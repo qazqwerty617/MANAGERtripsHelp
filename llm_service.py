@@ -144,7 +144,7 @@ _FORMAT_PROMPT = """Ти — професійний тревел-дизайне�
 1. Поверни ТІЛЬКИ Вступ та Рекомендації.
 2. Використовуй роздільник "===END_INTRO===" між Вступом та Рекомендаціями.
 3. СУВОРО ЗАБОРОНЕНО: Не пиши нумерований список готелів (1, 2, 3...) та типи харчування у вступі. Тільки заголовок та деталі перельоту.
-4. НЕ ПИШИ ціни — я додам їх сам.
+4. НЕ ПИШИ жодних цифр вартості, сум або цін (наприклад, "💰 загальна вартість туру...")! Рядок з цінами буде додано автоматично після твого тексту.
 5. НЕ ПИШИ фразу "Ціна актуальна..." — я додам її сам.
 """
 
@@ -1067,7 +1067,7 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
             if not val and prices_dict:
                 best_match_key = None
                 best_score = 0
-                generic_words = {"hotel", "resort", "beach", "spa", "village", "apartments", "suites", "boutique"}
+                generic_words = {"hotel", "resort", "beach", "spa", "village", "apartments", "apartamentos", "suites", "boutique", "готель"}
                 n_norm_words = set(re.sub(r'[^a-zа-яіїєґ0-9\s]', ' ', hotel_name.lower()).split()) - generic_words
                 
                 for k, v in prices_dict.items():
@@ -1085,7 +1085,7 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
                             best_score = overlap
                             best_match_key = k
                 
-                if best_match_key and (best_score > 0.4 or best_match_key == k):
+                if best_match_key and (best_score >= 0.35 or best_match_key == k):
                     val = prices_dict[best_match_key]
                         
             try:
