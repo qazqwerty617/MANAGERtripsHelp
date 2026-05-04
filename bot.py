@@ -118,21 +118,44 @@ async def handle_voice(message: Message):
     await bot.download_file(file_info.file_path, buf)
     file_bytes = buf.getvalue()
     
-    # Use the new voice handler for transcription and cleanup
+    # 1. Get RAW transcription first
     raw_text = await voice_handler.transcribe_voice(file_bytes)
     if not raw_text or raw_text.startswith("❌"):
         await msg.edit_text("🤷 Не вдалося розпізнати текст.")
         return
-
-    await msg.edit_text("✨ Формую підбірку...", parse_mode="HTML")
+    
+    # 2. Show the RAW text to the user (as requested: "показує текст який менеджер сказав")
+    await msg.edit_text(f"🗣 «{raw_text}»")
+    
+    # 3. Show the progress message
+    status_msg = await message.answer("✨ Формую підбірку...")
+    
     try:
-        # ✅ ВІДПРАВЛЯЄМО raw_text НАПРЯМУ, прибираючи cleanup_transcribed_text
-        result = await llm_service.format_tour_message(user_text=raw_text)
+        # 4. Quick destination detection from raw text to get hotel list for cleanup
+        db = excel_parser.get_hotel_db()
+        dest_hotels = None
+        if db:
+            dest = llm_service._pick_destination_by_keywords(raw_text, list(db.keys()))
+            if dest:
+                dest_hotels = db.get(dest, [])
+        
+        # 5. Cleanup the text with hotel DB context for better correction
+        cleaned_text = await voice_handler.cleanup_transcribed_text(raw_text, destination_hotels=dest_hotels)
+        logger.info(f"Voice cleaned: {cleaned_text[:200]}...")
+        
+        # 6. Use the cleaned text for formatting
+        result = await llm_service.format_tour_message(user_text=cleaned_text, raw_voice_text=raw_text)
+        
+        # 6. Send the final result
+        if len(result) <= MAX_MSG_LEN:
+            await status_msg.edit_text(result, disable_web_page_preview=True)
+        else:
+            await status_msg.delete()
+            await send_long_message(message, result)
+            
     except Exception as e:
         logger.error(f"format_tour_message voice error: {e}")
-        await message.answer("❌ Внутрішня помилка під час генерації. Спробуй ще раз.")
-        return
-    await send_long_message(message, result)
+        await status_msg.edit_text("❌ Внутрішня помилка під час генерації. Спробуй ще раз.")
 
 async def main():
     if not BOT_TOKEN:

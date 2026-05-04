@@ -12,20 +12,39 @@ logger = logging.getLogger(__name__)
 
 # --- Voice Specific Settings ---
 # Models for voice transcription cleanup
-VOICE_CLEANUP_MODELS = ["openai/gpt-5.4-mini", "google/gemini-2.5-flash"]
+VOICE_CLEANUP_MODELS = ["openai/gpt-4o-mini", "google/gemini-2.5-flash"]
 
-# Whisper prompt for transcription
-WHISPER_PROMPT = "Майорка, Тенеріфе, BLUESEA, Globales, AzuLine, HSM, BJ Playamar, Iberostar, Rixos, готель, євро, сніданки, дорослих."
+# Whisper prompt for transcription — the more context words, the better Whisper recognizes them
+WHISPER_PROMPT = (
+    "Авіатур на Майорку, Тенеріфе, Крит, Корфу, Родос, Кіпр, Ібіцу, Коста-Браву, Фуертевентуру, Лансароте, Гран-Канарію. "
+    "Виліт з Берліна, Дюссельдорфа, Варшави, Києва. Двоє дорослих, троє дітей. "
+    "Перший готель, другий готель, третій готель, четвертий готель, п'ятий готель, шостий готель, "
+    "сьомий готель, восьмий готель, дев'ятий готель, десятий готель, одинадцятий готель, дванадцятий готель. "
+    "BLUESEA, Globales, AzuLine, HSM, BJ Playamar, Iberostar, Rixos, Mitsis, Grecotel, H10, Riu, Barcelo, "
+    "Sol, Melia, THB, Hipotels, Zafiro, Viva, Occidental, Allegro, Palladium, JS, Mar Hotels, "
+    "Canvas, Kalypso, Knossos, Porto Platanias, Coriva Beach, Magda Hotel, Aquila, Daios Cove, Royal Hideaway, "
+    "Out Of The Blue, Mythos Suites, Minos Palace, Domes, Nana, Elounda, Panoramica, GF Noelia, "
+    "Villa Andromeda, Can Simoneta, Formentor. "
+    "Сніданки, напівпансіон, повний пансіон, все включено, ультра все включено, без харчування. "
+    "Ціна 100 євро, 200 євро, 500 євро, 1000 євро, 1500 євро, 2000 євро, 3000 євро за номер. "
+    "Пріоріті, багаж 20 кілограм, індивідуальний трансфер, шатл-бас, екскурсійна програма."
+)
 
 # Prompt for cleaning up voice transcription
-VOICE_CLEANUP_PROMPT = """Ти — коректор туристичних текстів. Твоє завдання: виправити помилки розпізнавання голосу (особливо в назвах готелів) та чітко структурувати текст. 
+VOICE_CLEANUP_PROMPT = """Ти — коректор туристичних текстів із голосового розпізнавання. 
+Твоє ЄДИНЕ завдання: виправити помилки та структурувати текст, НЕ ДОДАЮЧИ нічого від себе.
 
-ПРАВИЛА:
-1. ЗБЕРЕЖИ ПОРЯДОК: Готелі повинні йти РІВНО в тому порядку, в якому їх назвав менеджер. 
-2. СТРУКТУРА: Обов'язково пронумеруй кожен готель (1 готель - ..., 2 готель - ...), і поруч з ним вкажи його ціну. 
-3. Виправ транслітерацію брендів: "блюсія/блю сі" -> "BLUESEA", "глобаліс" -> "Globales", "іберостар" -> "Iberostar", "азулін" -> "AzuLine". 
-4. КРИТИЧНО: НЕ видаляй тип харчування (сніданки, все включено тощо)! Завжди залишай його біля готелів. 
-5. НЕ видаляй жодної цифри (вік дітей, кількість ночей, дати, ціни). 
+КРИТИЧНО ВАЖЛИВІ ПРАВИЛА:
+1. ЗБЕРЕЖИ ВСЕ: Кожне слово, кожну цифру, кожну ціну, кожен готель. НЕ ВИДАЛЯЙ нічого!
+2. СТРУКТУРА: Пронумеруй кожен готель окремим рядком:
+   1 готель - [назва] зі [харчуванням] [ціна] євро за номер
+   2 готель - [назва] зі [харчуванням] [ціна] євро за номер
+3. КІЛЬКІСТЬ: Якщо ти чуєш N окремих назв готелів — має бути N рядків. Якщо згадано "перший", "другий"... "восьмий" — має бути 8 готелів.
+4. РОЗДІЛЯЙ ГОТЕЛІ: Якщо кілька назв йдуть поспіль без нумерації — кожна назва це ОКРЕМИЙ готель. Наприклад: "Canvas 700 Porto 800 Domes 1000" = 3 окремих готелі.
+5. ВИПРАВ транслітерацію: "блюсі/блю сі" → "BLUESEA", "глобаліс" → "Globales", "іберостар" → "Iberostar", "азулін" → "AzuLine", "ріксос" → "Rixos", "мітсіс" → "Mitsis", "грекотель" → "Grecotel", "акуалія/аквіла" → "Aquila", "ноелія" → "GF Noelia".
+6. ХАРЧУВАННЯ: Не видаляй тип харчування (сніданки, все включено тощо).
+7. НЕ ВИГАДУЙ назви готелів, яких не було в тексті!
+8. Все крім готелів (дати, рейси, ціна авіа, послуги) — залиш одним абзацом на початку.
 """
 
 # --- LLM Client for voice cleanup ---
@@ -44,47 +63,111 @@ def _create_key_rotator():
 
 _groq_key_rotator = _create_key_rotator()
 
-async def transcribe_voice(file_bytes: bytes) -> str:
-    """Transcribes voice using Groq (Whisper) with fallback to OpenRouter."""
+# Gemini transcription prompt — gives Gemini context about what it's hearing
+GEMINI_TRANSCRIBE_PROMPT = """Транскрибуй це голосове повідомлення ДОСЛІВНО. Це туристичний менеджер, який диктує деталі туру.
+
+ПРАВИЛА:
+1. Запиши ВСЕ, що сказано — кожне слово, кожну цифру, кожну назву.
+2. Менеджер говорить українською/російською, але назви готелів — англійською. Збережи їх латиницею.
+3. СТРУКТУРА ТЕКСТУ: Менеджер зазвичай спочатку називає напрямок, дати, рейси, ціну авіа, потім перераховує готелі по порядку (перший готель, другий готель... або 1, 2, 3...).
+4. Кожен готель — окремий рядок з назвою, типом харчування та ціною.
+5. НЕ ДОДАВАЙ нічого від себе, НЕ ВИПРАВЛЯЙ назви готелів, просто запиши що чуєш.
+6. Якщо чутно нерозбірливо — запиши як чуєш, не пропускай."""
+
+async def _transcribe_with_gemini(file_bytes: bytes) -> str:
+    """Try transcribing voice using Gemini via OpenRouter (multimodal audio)."""
+    import base64
+    
+    audio_b64 = base64.b64encode(file_bytes).decode('utf-8')
+    
+    try:
+        resp = await client.chat.completions.create(
+            model="google/gemini-2.5-flash",
+            messages=[
+                {"role": "system", "content": GEMINI_TRANSCRIBE_PROMPT},
+                {"role": "user", "content": [
+                    {
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": audio_b64,
+                            "format": "ogg"
+                        }
+                    }
+                ]},
+            ],
+            temperature=0,
+            timeout=30,
+            max_tokens=3000,
+        )
+        text = resp.choices[0].message.content.strip()
+        if text and len(text) > 10:
+            logger.info(f"Gemini transcription success: {text[:100]}...")
+            return text
+    except Exception as e:
+        logger.warning(f"Gemini transcription failed: {e}")
+    return None
+
+async def _transcribe_with_whisper(file_bytes: bytes) -> str:
+    """Fallback: Transcribe using Groq Whisper."""
     active_keys = GROQ_API_KEYS if GROQ_API_KEYS else ([GROQ_API_KEY] if GROQ_API_KEY else [])
     if not active_keys:
-        logger.warning("No Groq API keys available for transcription.")
-    else:
-        for _ in range(len(active_keys)):
-            key = next(_groq_key_rotator)
-            url_groq = "https://api.groq.com/openai/v1/audio/transcriptions"
-            headers_groq = {"Authorization": f"Bearer {key}"}
-            
-            files = {"file": ("voice.ogg", file_bytes, "audio/ogg")}
-            data = {
-                "model": "whisper-large-v3",
-                "prompt": WHISPER_PROMPT,
-                "response_format": "json",
-                "language": "uk",
-            }
-            
-            async with httpx.AsyncClient() as c:
-                try:
-                    resp = await c.post(url_groq, headers=headers_groq, files=files, data=data, timeout=20)
-                    if resp.status_code == 200:
-                        text = resp.json().get("text", "")
-                        if text:
-                            # ПРИМУСОВА ЗАМІНА (Надійніше за будь-який промпт)
-                            fixes = {
-                                "блюсія": "BLUESEA", "блю сі": "BLUESEA", "Блюсія": "BLUESEA", "Блю сі": "BLUESEA",
-                                "глобаліс": "Globales", "Глобаліс": "Globales",
-                                "плеймар": "Playamar", "Плеймар": "Playamar",
-                                "азулін": "AzuLine", "Азулін": "AzuLine"
-                            }
-                            for bad, good in fixes.items():
-                                text = text.replace(bad, good)
-                            return text
-                    logger.warning(f"Groq key {key[:10]}... returned status {resp.status_code}. Trying next key.")
-                except Exception as e:
-                    logger.warning(f"Groq key {key[:10]}... failed: {e}. Trying next key.")
-                    continue
+        return None
+    
+    fixes = {
+        "блюсія": "BLUESEA", "блю сі": "BLUESEA", "Блюсія": "BLUESEA", "Блю сі": "BLUESEA",
+        "глобаліс": "Globales", "Глобаліс": "Globales",
+        "плеймар": "Playamar", "Плеймар": "Playamar",
+        "азулін": "AzuLine", "Азулін": "AzuLine",
+        "мітсіс": "Mitsis", "Мітсіс": "Mitsis",
+        "ріксос": "Rixos", "Ріксос": "Rixos",
+        "грекотель": "Grecotel", "Грекотель": "Grecotel",
+        "акуаліа": "Aquila", "Акуаліа": "Aquila",
+        "аквіла": "Aquila", "Аквіла": "Aquila",
+    }
+    
+    for _ in range(len(active_keys)):
+        key = next(_groq_key_rotator)
+        url_groq = "https://api.groq.com/openai/v1/audio/transcriptions"
+        headers_groq = {"Authorization": f"Bearer {key}"}
+        
+        files = {"file": ("voice.ogg", file_bytes, "audio/ogg")}
+        data = {
+            "model": "whisper-large-v3-turbo",
+            "prompt": WHISPER_PROMPT,
+            "response_format": "json",
+            "temperature": "0",
+        }
+        
+        async with httpx.AsyncClient() as c:
+            try:
+                resp = await c.post(url_groq, headers=headers_groq, files=files, data=data, timeout=25)
+                if resp.status_code == 200:
+                    text = resp.json().get("text", "")
+                    if text:
+                        for bad, good in fixes.items():
+                            text = text.replace(bad, good)
+                        return text
+                logger.warning(f"Groq key {key[:10]}... returned status {resp.status_code}.")
+            except Exception as e:
+                logger.warning(f"Groq key {key[:10]}... failed: {e}")
+                continue
+    return None
 
-    # Fallback to OpenRouter
+async def transcribe_voice(file_bytes: bytes) -> str:
+    """Transcribes voice using Gemini (primary) with Whisper fallback."""
+    
+    # 1. Try Gemini first — much better at understanding context and mixed languages
+    gemini_text = await _transcribe_with_gemini(file_bytes)
+    if gemini_text:
+        return gemini_text
+    
+    # 2. Fallback to Whisper on Groq
+    logger.info("Gemini failed, falling back to Whisper...")
+    whisper_text = await _transcribe_with_whisper(file_bytes)
+    if whisper_text:
+        return whisper_text
+    
+    # 3. Final fallback to OpenRouter Whisper
     if OPENROUTER_API_KEY:
         try:
             url_or = "https://openrouter.ai/api/v1/audio/transcriptions"
@@ -100,27 +183,24 @@ async def transcribe_voice(file_bytes: bytes) -> str:
                 if resp.status_code == 200:
                     text = resp.json().get("text", "")
                     if text:
-                        # ПРИМУСОВА ЗАМІНА
-                        fixes = {
-                            "блюсія": "BLUESEA", "блю сі": "BLUESEA", "Блюсія": "BLUESEA", "Блю сі": "BLUESEA",
-                            "глобаліс": "Globales", "Глобаліс": "Globales",
-                            "плеймар": "Playamar", "Плеймар": "Playamar",
-                            "азулін": "AzuLine", "Азулін": "AzuLine"
-                        }
-                        for bad, good in fixes.items():
-                            text = text.replace(bad, good)
                         return text
         except Exception as e:
             logger.error(f"OpenRouter Whisper fallback failed: {e}")
+    
+    return "❌ Помилка розпізнавання (всі сервіси недоступні)."
 
-    return "❌ Помилка розпізнавання (обидва сервіси недоступні)."
-
-async def cleanup_transcribed_text(raw_text: str) -> str:
+async def cleanup_transcribed_text(raw_text: str, destination_hotels: list = None) -> str:
     """Cleans up the transcription using LLM to fix errors and hallucinations."""
     if not raw_text:
         return raw_text
     
     logger.info(f"Voice transcription raw: {raw_text}")
+    
+    # Build context with hotel names if available
+    user_content = raw_text
+    if destination_hotels:
+        hotel_names = "\n".join([h['hotel'] for h in destination_hotels[:100]])
+        user_content = f"ТЕКСТ З ГОЛОСОВОГО:\n{raw_text}\n\nДОВІДНИК ГОТЕЛІВ (використай для виправлення назв):\n{hotel_names}"
     
     for model in VOICE_CLEANUP_MODELS:
         try:
@@ -128,10 +208,11 @@ async def cleanup_transcribed_text(raw_text: str) -> str:
                 model=model,
                 messages=[
                     {"role": "system", "content": VOICE_CLEANUP_PROMPT},
-                    {"role": "user", "content": raw_text},
+                    {"role": "user", "content": user_content},
                 ],
                 temperature=0,
                 timeout=30,
+                max_tokens=2000,
             )
             cleaned = resp.choices[0].message.content.strip()
             # Remove potential markdown code blocks

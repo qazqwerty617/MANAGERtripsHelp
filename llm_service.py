@@ -70,11 +70,14 @@ _EXTRACT_PROMPT = """Ти — спеціалізований AI-асистент
 
 ПРАВИЛА:
 1. ПОРЯДОК ТА КІЛЬКІСТЬ: Повертай готелі СУВОРО в тому порядку, в якому вони йдуть у тексті. Це КРИТИЧНО для голосових повідомлень.
-2. Твоя головна мета — знайти відповідність у "СПИСКУ ГОТЕЛІВ НАПРЯМКУ". 
-3. КРИТИЧНО: Якщо готелю з тексту НЕМАЄ в наданому списку і ти не впевнений на 100% у збігу — НЕ ВИГАДУЙ. У такому випадку поверни оригінальну назву з тексту менеджера, додавши префікс [NOT_FOUND].
-4. Якщо вказано 6 готелів — поверни 6. Не намагайся додати зайві готелі з бази, яких немає в тексті.
-5. ФОРМАТ: Тільки JSON {"hotels": ["Name 1", "Name 2", "[NOT_FOUND] Name 3"]}. Жодного іншого тексту.
+2. КІЛЬКІСТЬ: Якщо менеджер назвав 8 готелів — ПОВЕРНИ 8. Якщо назвав 5 — поверни 5. НІКОЛИ не пропускай жодного готелю!
+3. Твоя головна мета — знайти відповідність у "СПИСКУ ГОТЕЛІВ НАПРЯМКУ". Навіть якщо назва відрізняється на 1-3 букви — це той самий готель.
+4. СУВОРО: ОЧИЩАЙ назви готелів від цін, типів харчування (напр. 'все включено', 'сніданки') та іншого сміття. У назві має залишитись ТІЛЬКИ назва готелю (напр. "Hotel Torremar Sol & Spa").
+5. Якщо готелю з тексту НЕМАЄ в наданому списку — НЕ ВИГАДУЙ. Якщо назва відрізняється більше ніж на одне-два ключових слова, це ІНШИЙ готель. Наприклад: 'Iberostar' і 'Protur' — це РІЗНІ готелі. 'Torremar' і 'Lunamar' — це РІЗНІ готелі! У такому випадку поверни оригінальну ОЧИЩЕНУ назву з тексту менеджера, додавши префікс [NOT_FOUND].
+6. Якщо вказано 8 готелів — поверни 8. Не намагайся додати зайві готелі з бази, яких немає в тексті.
+7. ФОРМАТ: Тільки JSON {"hotels": ["Name 1", "Name 2", "[NOT_FOUND] Name 3"]}. Жодного іншого тексту.
 """
+
 
 _EXTRACT_PRICES_PROMPT = """Ти — фінансовий аналітик туристичних турів. 
 Твоє завдання: витягти числові дані для розрахунку.
@@ -86,44 +89,55 @@ _EXTRACT_PRICES_PROMPT = """Ти — фінансовий аналітик ту�
 4. nights: кількість ночей.
 5. check_in_month: номер місяця (1-12).
 6. check_in_day: число місяця.
-7. flight_total: ЗАГАЛЬНА ціна авіа за всіх. Якщо вказано за особу — просто поверни як є, я сам порахую.
-8. hotel_prices: СЛОВНИК, де ключ - це назва готелю, а значення - загальна ціна за номер (тільки число).
-9. hotel_stars: список зірковості.
-10. other_per_person: інші витрати на особу.
+7. flight_price: ЗАГАЛЬНА ціна авіа за всіх (число).
+8. flight_is_per_person: true, якщо менеджер чітко сказав "за особу/на людину", інакше false.
+9. hotel_prices: СЛОВНИК, де ключ - це назва готелю, а значення - загальна ціна за номер (тільки число). КРИТИЧНО: Витягни ціни для ВСІХ готелів у тексті! Якщо їх 15, має бути 15 цін. Не зупиняйся на півдорозі.
+10. hotel_stars: список зірковості.
 11. baggage_info: опис багажу/пріоріті, напр: "багаж 20кг", "пріоріті", "додаткова ручна поклажа 10кг", або null якщо не згадано.
-12. extras: список додаткових послуг (трансфер, екскурсії, додатковий багаж). Кожна послуга - це об'єкт {"name": "<назва>", "price_per_person": <ціна за особу в євро>}. Якщо ціна вказана загальна на всіх — поділи на кількість осіб (adults+children). Якщо немає — порожній список [].
+12. extras: список додаткових послуг. Кожна послуга - це об'єкт:
+    {"type": "transfer" | "excursion" | "priority" | "baggage" | "shuttle", "original_name": "назва з тексту", "price": <число в євро>, "is_per_person": <true/false>}
+    ПРАВИЛА РОЗРАХУНКУ:
+    - Якщо менеджер сказав "за особу" або "на людину" -> is_per_person: true.
+    - В іншому випадку (навіть якщо це пріоріті) -> is_per_person: false.
+    - Якщо вказано кількість та ціну за одиницю (наприклад, "2 багажі по 120 євро кожен"), ОБОВ'ЯЗКОВО перемнож їх і запиши ЗАГАЛЬНУ суму (240).
+    - Більше ЖОДНИХ математичних дій не роби. Запиши ціну.
+    ОБОВ'ЯЗКОВО витягни ВСІ послуги (трансфери, пріоріті, екскурсії, багаж), про які згадав менеджер.
+    Якщо нічого не згадано — порожній список [].
 
-ФОРМАТ: Тільки JSON {"hotel_prices": {"Назва готелю": 1500}}. 
+ФОРМАТ: Тільки JSON.
 КРИТИЧНО: Не роби жодних математичних розрахунків. Просто витягни сирі цифри з тексту.
 """
 
 _FORMAT_PROMPT = """Ти — професійний тревел-дизайнер. Твоє завдання: написати вступну частину повідомлення та блок рекомендацій.
 
 БЛОК 1: ВСТУП (ПРИКЛАД):
-Авіатур до Майорки 🇪🇸
+Авіатур на Майорку 🇪🇸
 Із Берліна 🇩🇪
-🌤️ 15.06 - 25.06, 10 ночей
-Туди 22:10
-Назад 15:35
-[РЯДОК ПРО БАГАЖ — обов'язковий, один з варіантів]:
-   - За замовчуванням: 🧳 ручна поклажа до 10 кг та розміром 20х40х30 см
-   - Якщо є пріоріті: 🧳 ручна поклажа до 10кг та розміром 20х40х30 см + 1 пріоріті
-   - Якщо є багаж: 🧳 ручна поклажа до 10кг + 1 багаж [вага]кг
-   - Якщо є додаткова ручна поклажа: 🧳 ручна поклажа до 10кг + 1 додаткова ручна поклажа 10кг
-   - Якщо є і багаж і пріоріті: 🧳 ручна поклажа до 10кг + 1 багаж [вага]кг + 1 пріоріті
-[ДОДАТКОВІ ПОСЛУГИ — пиши ТІЛЬКИ ті що згадані менеджером, кожну з нового рядка]:
-   - 🚖 Індивідуальний трансфер до готелю / до аеропорту / в 2 сторони
-   - 🚍 Шатл-бас до готелю / до аеропорту / в 2 сторони / door-to-door
-   - ⭐️ Програма туру / Екскурсійна програма / Програма екскурсій
-   НЕ ПИШИ ці рядки якщо менеджер їх НЕ згадував!
+🌤️ 15-25 червня, 10 ночей
+Туди 22:10-00:55
+Назад 15:35-18:20
+[РЯДОК ПРО БАГАЖ — адаптуй до тексту менеджера]:
+   - Якщо згадано пріоріті: 🧳 ручна поклажа до 10 кг та розміром 20х40х30 см + 1 додаткова пріоріті
+   - Якщо згадано багаж: 🧳 ручна поклажа до 10 кг + 1 багаж [вага]кг
+   - Якщо нічого: 🧳 ручна поклажа до 10 кг та розміром 20х40х30 см
+[ДОДАТКОВІ ПОСЛУГИ — пиши ТІЛЬКИ ті, що згадані менеджером, вибирай точну назву без слешів]:
+   - 🚖 Індивідуальний трансфер в 2 сторони (або до готелю, залежно від тексту)
+   - 🚍 Шатл-бас в 2 сторони (або до готелю)
+   - ⭐️ Екскурсійна програма
+   СУВОРО: Якщо в оригінальному тексті НЕМАЄ слова 'екскурсія', 'програма', 'трансфер' або 'шатл' — ти ПОВИНЕН видалити цей рядок з повідомлення! Ніколи не пиши послугу за замовчуванням.
+
+ВАЖЛИВО ПРО ФОРМАТУВАННЯ ВСТУПУ:
+НЕ РОБИ жодних порожніх рядків між блоком багажу та блоком додаткових послуг! Вони мають йти суцільним списком. Також не роби порожніх рядків в кінці вступу.
 
 БЛОК 2: РЕКОМЕНДАЦІЇ (ОБОВ'ЯЗКОВО):
 - Оберіть ТІЛЬКИ 2-3 найкращих готелі з наданого списку. НЕ БІЛЬШЕ.
-- Для кожного обраного готелю напишіть переконливий опис (400-600 символів).
-- Пишіть емоційно, від першої особи, підкреслюючи переваги.
-- Формат:
-**[Назва готелю] [Зірки]**
-[Ваш текст опису]
+- Пишіть опис без заголовків з зірочками. Назва готелю має бути органічно вписана в текст.
+- Пишіть емоційно, від першої особи.
+- ПРИКЛАД ОПИСУ:
+Хочу звернути вашу увагу на Globales Verdemar Apartamentos. Це чудовий варіант для тих, хто шукає комфортний відпочинок з видом на море. Тут ви знайдете просторі апартаменти...
+
+Якщо ви шукаєте щось більш активне, BLUESEA Costa Verde стане чудовим вибором. Цей готель пропонує безліч розваг...
+
 (порожній рядок між рекомендаціями)
 
 ПРАВИЛА:
@@ -197,7 +211,7 @@ _MEAL_EXTRACT_PROMPT = """Ти — спеціаліст із туристичн�
    - "все включено"
    - "ультра все включено"
    - "без харчування"
-4. КІЛЬКІСТЬ: Якщо в тексті 7 готелів, у масиві "meals" має бути РІВНО 7 елементів.
+4. КІЛЬКІСТЬ: Якщо в тексті 15 готелів, у масиві "meals" має бути РІВНО 15 елементів. Знайди тип харчування для КОЖНОГО готелю, не зупиняйся завчасно!
 5. ФОРМАТ: Тільки JSON {"meals": ["тип 1", "тип 2"]}.
 """
 
@@ -300,9 +314,11 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
 
     best_match = None
     max_score = 0.0
-    query = normalize_name(hotel_name)
+    # Strip [NOT_FOUND] if present
+    query_name = hotel_name.replace("[NOT_FOUND]", "").strip()
+    query = normalize_name(query_name)
     if not query:
-        query = hotel_name.lower()
+        query = query_name.lower()
     
     query_words = set(re.findall(r'\w+', query))
     query_brands = query_words & BRANDS
@@ -353,18 +369,18 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
             # (e.g. Query="Blue Sea Cala Millor", DB="Cala Millor Garden")
             extra_words = unique_query_words - unique_db_words
             if extra_words:
-                score -= len(extra_words) * 0.7 # Increased from 0.2 to 0.7 (вбиває галюцинації)
+                score -= len(extra_words) * 0.2 # Lowered from 0.7 to allow extra words like "Lifestyle" or "Beach"
 
         # Penalty for large length difference
         len_diff = abs(len(query) - len(db_name))
         if len_diff > 10:
-            score -= 0.4
+            score -= 0.1
 
         if score > max_score:
             max_score = score
             best_match = h
             
-    if best_match and max_score > 0.75: # Lowered threshold from 0.82
+    if best_match and max_score > 0.65: # Lowered threshold to allow 1-3 letters errors
         return best_match, max_score
         
     return {"hotel": hotel_name, "link": "Посилання відсутнє ⚠️"}, 0.0
@@ -652,7 +668,7 @@ def _count_potential_hotels(text: str) -> int:
     patterns = [
         r'(?:^|\n|\s)\d+\s*[)\.]\s+', # 1) or 1. at start or after space
         r'(?:^|\n|\s)\d+\s+(?:готель|отель|варіант|вариант)', # 1 готель
-        r'(?:перший|другий|третій|четвертий|п’ятий|шостий|сьомий|восьмий|дев’ятий|десятий)\s+(?:готель|отель|варіант|вариант)'
+        r'(?:перший|другий|третій|четвертий|п[\'’]ятий|шостий|сьомий|восьмий|дев[\'’]ятий|десятий|одинадцятий|дванадцятий|тринадцятий|чотирнадцятий|п[\'’]ятнадцятий|шістнадцятий|наступний)\s+(?:готель|отель|варіант|вариант)'
     ]
     all_matches = set()
     for p in patterns:
@@ -681,8 +697,11 @@ def _sort_hotels_by_appearance(hotels: list[str], text: str) -> list[str]:
         (r'\b(\d+)\s*[)\.]\s+', 1),
         (r'\b(\d+)\s+(?:готель|отель|варіант|вариант)', 1),
         (r'\b(перший)\b', 1), (r'\b(другий)\b', 2), (r'\b(третій)\b', 3),
-        (r'\b(четвертий)\b', 4), (r'\b(п’ятий)\b', 5), (r'\b(шостий)\b', 6),
-        (r'\b(сьомий)\b', 7), (r'\b(восьмий)\b', 8), (r'\b(дев’ятий)\b', 9), (r'\b(десятий)\b', 10)
+        (r'\b(четвертий)\b', 4), (r'\b(п[\'’]ятий)\b', 5), (r'\b(шостий)\b', 6),
+        (r'\b(сьомий)\b', 7), (r'\b(восьмий)\b', 8), (r'\b(дев[\'’]ятий)\b', 9), (r'\b(десятий)\b', 10),
+        (r'\b(одинадцятий)\b', 11), (r'\b(дванадцятий)\b', 12), (r'\b(тринадцятий)\b', 13), 
+        (r'\b(чотирнадцятий)\b', 14), (r'\b(п[\'’]ятнадцятий)\b', 15), (r'\b(шістнадцятий)\b', 16),
+        (r'\b(наступний)\b', 20) # Treat 'наступний' as a general marker
     ]
     
     found_ordinals = []
@@ -822,11 +841,17 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         clean_dest_name = re.sub(r'\s*\d+\s*стр.*', '', selected_dest, flags=re.IGNORECASE).strip().title()
     
     price_data = await price_task
-    # broad_hotels = await broad_hotel_task # Skip broad task to rely more on targeted extraction
+    broad_hotels = await broad_hotel_task
     extracted_meals = await meal_task
     
     # NEW: If price_data has more hotels than we extracted, we need to be careful
-    expected_count = len(price_data.get("hotel_prices", [])) if price_data else 0
+    hotel_prices_raw = price_data.get("hotel_prices", {}) if price_data else {}
+    if isinstance(hotel_prices_raw, dict):
+        expected_count = len(hotel_prices_raw)
+    elif isinstance(hotel_prices_raw, list):
+        expected_count = len(hotel_prices_raw)
+    else:
+        expected_count = 0
     
     # If price extractor found fewer hotels than our heuristic, use the higher number as expected
     if potential_count > expected_count:
@@ -836,6 +861,7 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
     logger.info(f"Step 1 parallel done in {asyncio.get_event_loop().time() - start_time:.2f}s. Dest: {clean_dest_name}")
 
     relevant_hotels = db.get(selected_dest, [])
+    candidate_hotels = _build_hotel_candidates(hotel_search_text, relevant_hotels)
     
     # -----------------------------------------
     # STRICT DIRECT MATCHING PHASE
@@ -858,9 +884,9 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
                 direct_matched_hotels.append(h['hotel'])
             else:
                 unique_db_words = set(h_words) - BRANDS
-                if unique_db_words and all(word in text_clean_for_search for word in unique_db_words):
+                text_words = set(text_clean_for_search.split())
+                if unique_db_words and all(word in text_words for word in unique_db_words):
                     db_brands = set(h_words) & BRANDS
-                    text_words = set(text_clean_for_search.split())
                     text_brands = text_words & BRANDS
                     if not db_brands or (db_brands & text_brands):
                         direct_matched_hotels.append(h['hotel'])
@@ -878,9 +904,6 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         if expected_count > 0:
             extraction_content += f"\n\nВАЖЛИВО: Я очікую знайти РІВНО {expected_count} готелів."
         
-        if direct_matched_hotels:
-            extraction_content += f"\n\nПІДКАЗКА: Деякі готелі, що точно є в тексті: {', '.join(direct_matched_hotels)}"
-        
         raw = await _call_llm_with_retry(
             messages=[{"role": "system", "content": _EXTRACT_PROMPT}, {"role": "user", "content": extraction_content}],
             models=["openai/gpt-4o-mini", "google/gemini-2.5-flash"],
@@ -896,6 +919,18 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
 
     extracted_hotels = await _do_targeted_extract(hotel_search_text)
     logger.info(f"LLM extracted {len(extracted_hotels)} hotels: {extracted_hotels}")
+    
+    # Merge broad extraction results ONLY if the LLM found very few hotels and we expect more
+    if expected_count > 0 and broad_hotels and len(extracted_hotels) < expected_count:
+        logger.info(f"LLM found {len(extracted_hotels)} but we expect {expected_count}. Merging with broad search results...")
+        existing_lower = {h.replace('[NOT_FOUND]', '').strip().lower() for h in extracted_hotels}
+        for bh in broad_hotels:
+            bh_clean = bh.replace('[NOT_FOUND]', '').strip().lower()
+            if bh_clean not in existing_lower:
+                extracted_hotels.append(bh)
+                existing_lower.add(bh_clean)
+            if len(extracted_hotels) >= expected_count: break
+        logger.info(f"After merge: {len(extracted_hotels)} hotels")
     
     if not extracted_hotels or (expected_count > 0 and len(extracted_hotels) < expected_count):
         logger.info(f"LLM extraction found {len(extracted_hotels)} but expected {expected_count}. Trying fallback search...")
@@ -977,22 +1012,25 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
     # Matching extracted names with DB to get links and full names
     for h_name in extracted_hotels:
         match, score = fuzzy_match_hotel(h_name, relevant_hotels)
-        if score < 0.75 and all_hotels_list:
+        if score < 0.65 and all_hotels_list:
             global_match, g_score = fuzzy_match_hotel(h_name, all_hotels_list)
-            if g_score > 0.75:
+            if g_score > 0.65:
                 match, score = global_match, g_score
         
         display_name = match["hotel"]
         stars = _extract_allowed_stars(display_name)
         display_name = re.sub(r'\s*[1-5]\s*(?:\*|★)', '', display_name).strip()
 
-        if "[NOT_FOUND]" in h_name:
+        if score >= 0.65:
+            # We found a match even if LLM said [NOT_FOUND]
+            pass
+        elif "[NOT_FOUND]" in h_name:
             display_name = h_name.replace("[NOT_FOUND]", "").strip() + " ⚠️ (немає в базі)"
             match = {"hotel": display_name, "link": "Посилання відсутнє ⚠️"}
-        elif score < 0.75:
+        elif score < 0.65:
             display_name = f"{h_name} ⚠️"
             match = {"hotel": display_name, "link": "Посилання відсутнє ⚠️"}
-        elif score < 0.90: 
+        elif score < 0.85: 
             display_name = f"{display_name} ⚠️"
 
         if stars and stars not in display_name:
@@ -1026,13 +1064,29 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
             val = prices_dict.get(hotel_name, 0)
             
             # Нечіткий пошук у словнику, якщо ключ трохи відрізняється
-            if not val:
+            if not val and prices_dict:
+                best_match_key = None
+                best_score = 0
+                generic_words = {"hotel", "resort", "beach", "spa", "village", "apartments", "suites", "boutique"}
+                n_norm_words = set(re.sub(r'[^a-zа-яіїєґ0-9\s]', ' ', hotel_name.lower()).split()) - generic_words
+                
                 for k, v in prices_dict.items():
-                    k_norm = re.sub(r'[^a-zа-яіїєґ0-9]', '', k.lower())
-                    n_norm = re.sub(r'[^a-zа-яіїєґ0-9]', '', hotel_name.lower())
-                    if k_norm in n_norm or n_norm in k_norm:
-                        val = v
+                    k_norm_str = re.sub(r'[^a-zа-яіїєґ0-9]', '', k.lower())
+                    n_norm_str = re.sub(r'[^a-zа-яіїєґ0-9]', '', hotel_name.lower())
+                    if k_norm_str in n_norm_str or n_norm_str in k_norm_str:
+                        best_match_key = k
                         break
+                    
+                    # Word overlap
+                    k_norm_words = set(re.sub(r'[^a-zа-яіїєґ0-9\s]', ' ', k.lower()).split()) - generic_words
+                    if k_norm_words and n_norm_words:
+                        overlap = len(k_norm_words & n_norm_words) / max(len(k_norm_words), len(n_norm_words))
+                        if overlap > best_score:
+                            best_score = overlap
+                            best_match_key = k
+                
+                if best_match_key and (best_score > 0.4 or best_match_key == k):
+                    val = prices_dict[best_match_key]
                         
             try:
                 p_clean = re.sub(r'[^\d.]', '', str(val).replace(',', '.'))
@@ -1058,24 +1112,34 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         has_children = (children + infants) > 0
         
         # NEW: Raw flight price (might be total or per person)
-        flight_raw_val = price_data.get("flight_total") or price_data.get("flight_per_person") or 0
+        flight_raw_val = price_data.get("flight_price") or price_data.get("flight_total") or price_data.get("flight_per_person") or 0
         flight_per_person = 0.0
         try:
             f_clean = float(re.sub(r'[^\d.]', '', str(flight_raw_val).replace(',', '.')) or 0)
-            if f_clean > 500 and total_people > 1 and "total" in str(price_data.keys()).lower():
+            is_per_person = price_data.get("flight_is_per_person", False)
+            
+            if not is_per_person and f_clean > 500 and total_people > 1:
+                flight_per_person = f_clean / total_people
+            elif not is_per_person and total_people > 1:
+                # If they specify a small flight price but don't explicitly say "per person", assume it's total if we have >1 people
                 flight_per_person = f_clean / total_people
             else:
                 flight_per_person = f_clean
         except: pass
         
-        other = 0.0
-        try:
-            other_raw = str(price_data.get("other_per_person") or "0")
-            other = float(re.sub(r'\D.', '', other_raw.replace(',', '.')) or 0)
-        except: pass
-        
         extras_list = price_data.get("extras", [])
-        extras_per_person = sum(float(e.get("price_per_person", 0)) for e in extras_list)
+        extras_per_person = 0.0
+        for e in extras_list:
+            try:
+                if "price_per_person" in e:
+                    extras_per_person += float(e["price_per_person"])
+                else:
+                    p = float(e.get("price", 0))
+                    if e.get("is_per_person"):
+                        extras_per_person += p
+                    else:
+                        extras_per_person += p / total_people if total_people > 0 else p
+            except: pass
         
         nights = _safe_int(price_data.get("nights"), 7)
         month = _safe_int(price_data.get("check_in_month"), 6)
@@ -1098,18 +1162,18 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
             
             tax_per_person_share = total_tax_for_stay / total_people if total_people > 0 else 0
             
-            # MATH LOGIC FROM APRIL 28TH + EXTRAS
+            # MATH LOGIC FROM APRIL 28TH + EXTRAS + TAX
             hotel_per_person = hotel_total / total_people if total_people > 0 else hotel_total
-            base_cost_no_tax = hotel_per_person + flight_per_person + other + extras_per_person
+            base_cost_no_tax = hotel_per_person + flight_per_person + extras_per_person + tax_per_person_share
             
             if base_cost_no_tax < 350:
                 final_no_tax = base_cost_no_tax + 150
             else:
                 final_no_tax = base_cost_no_tax * 1.43
             
-            tax_with_margin = tax_per_person_share * 1.43
-            final = final_no_tax + tax_with_margin
-            final = round(final) + 5
+            # Tax is already inside base_cost_no_tax, so it was multiplied.
+            # Add +5 as insurance
+            final = round(final_no_tax) + 5
             
             if has_children:
                 computed_prices.append(round(final * total_people))
@@ -1131,11 +1195,23 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
     extras_desc = ""
     _baggage = price_data.get("baggage_info") if price_data else None
     _extras = price_data.get("extras", []) if price_data else []
+    
+    # If priority/baggage is in extras but not in baggage_info, sync them
+    if not _baggage:
+        prio_item = next((e for e in _extras if e.get('type') in ['priority', 'baggage']), None)
+        if prio_item:
+            _baggage = prio_item.get('original_name')
+
     if _baggage:
-        extras_desc += f"\nБАГАЖ: {_baggage}"
+        extras_desc += f"\nБАГАЖ ТА ПРІОРІТІ: {_baggage}"
+    
     if _extras:
-        items = "\n".join([f"- {e['name']}: {e.get('price_per_person', '?')}€/особу" for e in _extras])
-        extras_desc += f"\nДОДАТКОВІ ПОСЛУГИ (ціни вже враховані в розрахунку):\n{items}"
+        items = []
+        for e in _extras:
+            etype = str(e.get('type', 'послуга')).upper()
+            ename = e.get('original_name', 'послуга')
+            items.append(f"- {etype}: {ename}")
+        extras_desc += f"\nДОДАТКОВІ ПОСЛУГИ ТЕКСТОМ:\n" + "\n".join(items)
     
     combined_content = f"ТЕКСТ МЕНЕДЖЕРА:\n{user_text}\n\nНАПРЯМОК: {clean_dest_name}\n\n"
     combined_content += f"БАЗА ГОТЕЛІВ ТА ЦІНИ (ВИКОРИСТОВУЙ ВСЕ):\n{db_text}\n{extras_desc}\n\n"
@@ -1161,7 +1237,7 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         # (We assume LLM followed the instruction to provide Intro and Recommendations)
         
         # 2. Build the "Options" block programmatically (100% precision)
-        options_block = "\n🏠 варіанти проживання:\n\n"
+        options_block = "🏠 варіанти проживання:\n\n"
         for i, hotel_data in enumerate(matched_hotels, 1):
             name = hotel_data['hotel']
             # Link mapping: use the exact name as stored in matched_hotels
