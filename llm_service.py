@@ -1281,6 +1281,29 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
             intro = "\n".join(intro_lines).strip()
             recommendations_raw = "\n".join(recommendation_lines).strip()
         
+        # Жорсткий контроль екскурсійної програми
+        text_for_check = (user_text + " " + (raw_voice_text or "")).lower()
+        has_excursion = "екскурс" in text_for_check
+        
+        intro_lines_split = intro.split("\n")
+        new_intro_lines = []
+        excursion_present = False
+        
+        for line in intro_lines_split:
+            if "екскурс" in line.lower() or "⭐️ екскурсійна" in line.lower():
+                if has_excursion:
+                    excursion_present = True
+                    new_intro_lines.append(line)
+                # Якщо не казав, а LLM додала - рядок просто видаляється
+            else:
+                new_intro_lines.append(line)
+                
+        if has_excursion and not excursion_present:
+            # Якщо менеджер казав, а LLM забула - додаємо обов'язково
+            new_intro_lines.append("   - ⭐️ Екскурсійна програма")
+                
+        intro = "\n".join(new_intro_lines).strip()
+
         # Programmatically limit recommendations to 3
         rec_parts = re.split(r'\n(?=\*\*)', recommendations_raw)
         recommendations = "\n".join(rec_parts[:3]).strip()
