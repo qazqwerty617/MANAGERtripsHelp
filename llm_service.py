@@ -71,9 +71,9 @@ _EXTRACT_PROMPT = """Ти — спеціалізований AI-асистент
 ПРАВИЛА:
 1. ПОРЯДОК ТА КІЛЬКІСТЬ: Повертай готелі СУВОРО в тому порядку, в якому вони йдуть у тексті. Це КРИТИЧНО для голосових повідомлень.
 2. КІЛЬКІСТЬ: Якщо менеджер назвав 8 готелів — ПОВЕРНИ 8. Якщо назвав 5 — поверни 5. НІКОЛИ не пропускай жодного готелю!
-3. Твоя головна мета — знайти відповідність у "СПИСКУ ГОТЕЛІВ НАПРЯМКУ". Навіть якщо назва відрізняється на 1-3 букви — це той самий готель.
-4. СУВОРО: ОЧИЩАЙ назви готелів від цін, типів харчування (напр. 'все включено', 'сніданки') та іншого сміття. У назві має залишитись ТІЛЬКИ назва готелю (напр. "Hotel Torremar Sol & Spa").
-5. Якщо готелю з тексту НЕМАЄ в наданому списку — НЕ ВИГАДУЙ. Якщо назва відрізняється більше ніж на одне-два ключових слова, це ІНШИЙ готель. Наприклад: 'Iberostar' і 'Protur' — це РІЗНІ готелі. 'Torremar' і 'Lunamar' — це РІЗНІ готелі! У такому випадку поверни оригінальну ОЧИЩЕНУ назву з тексту менеджера, додавши префікс [NOT_FOUND].
+3. Твоя головна мета — знайти ТОЧНУ відповідність у "СПИСКУ ГОТЕЛІВ НАПРЯМКУ". Назви повинні збігатися на 95%+.
+4. СУВОРО: ОЧИЩАЙ назви готелів від цін, типів харчування (напр. 'все включено', 'сніданки') та іншого сміття. У назві має залишитись ТІЛЬКИ назва готелю.
+5. СУВОРО ЗАБОРОНЕНО ВИГАДУВАТИ! Якщо готелю з тексту НЕМАЄ в наданому списку (немає точного або 95%+ збігу) — НЕ ПІДСТАВЛЯЙ ІНШИЙ ГОТЕЛЬ! У такому випадку поверни оригінальну ОЧИЩЕНУ назву з тексту менеджера, додавши префікс [NOT_FOUND].
 6. Якщо вказано 8 готелів — поверни 8. Не намагайся додати зайві готелі з бази, яких немає в тексті.
 7. ФОРМАТ: Тільки JSON {"hotels": ["Name 1", "Name 2", "[NOT_FOUND] Name 3"]}. Жодного іншого тексту.
 """
@@ -387,7 +387,7 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
             max_score = score
             best_match = h
             
-    if best_match and max_score > 0.65: # Lowered threshold to allow 1-3 letters errors
+    if best_match and max_score >= 0.90: # Strict 95%+ similarity required
         return best_match, max_score
         
     return {"hotel": hotel_name, "link": "Посилання відсутнє ⚠️"}, 0.0
@@ -658,7 +658,7 @@ def _fallback_hotel_extraction(user_text: str, candidate_hotels: list) -> list:
                         matches += 1
                         break
         
-        if matches / len(name_words) >= 0.75: 
+        if matches / len(name_words) >= 0.95: 
             fuzzy_matches.append(name)
             
     # Sort by appearance in text
@@ -1028,17 +1028,15 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         stars = _extract_allowed_stars(display_name)
         display_name = re.sub(r'\s*[1-5]\s*(?:\*|★)', '', display_name).strip()
 
-        if score >= 0.65:
-            # We found a match even if LLM said [NOT_FOUND]
+        if score >= 0.90:
+            # We found a match
             pass
         elif "[NOT_FOUND]" in h_name:
             display_name = h_name.replace("[NOT_FOUND]", "").strip() + " ⚠️ (немає в базі)"
             match = {"hotel": display_name, "link": "Посилання відсутнє ⚠️"}
-        elif score < 0.65:
-            display_name = f"{h_name} ⚠️"
+        elif score < 0.90:
+            display_name = f"{h_name} ⚠️ (немає в базі)"
             match = {"hotel": display_name, "link": "Посилання відсутнє ⚠️"}
-        elif score < 0.85: 
-            display_name = f"{display_name} ⚠️"
 
         if stars and stars not in display_name:
             display_name = f"{display_name} {stars}"
