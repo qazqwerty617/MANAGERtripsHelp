@@ -1032,10 +1032,10 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
             # We found a match
             pass
         elif "[NOT_FOUND]" in h_name:
-            display_name = h_name.replace("[NOT_FOUND]", "").strip() + " ⚠️ (немає в базі)"
+            display_name = h_name.replace("[NOT_FOUND]", "").strip() + " ⚠️"
             match = {"hotel": display_name, "link": "Посилання відсутнє ⚠️"}
         elif score < 0.90:
-            display_name = f"{h_name} ⚠️ (немає в базі)"
+            display_name = f"{h_name} ⚠️"
             match = {"hotel": display_name, "link": "Посилання відсутнє ⚠️"}
 
         if stars and stars not in display_name:
