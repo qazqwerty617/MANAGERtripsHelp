@@ -25,7 +25,7 @@ client = AsyncOpenAI(
 _NOISE_TOKENS = {
     "hotel", "hotels", "apartments", "apartment", "apartamentos", "apartamento",
     "resort", "spa", "villas", "villa", "the", "by", "and", "suites", "suite",
-    "hostal", "pension", "boutique", "park", "garden", "beach", "club",
+    "hostal", "pension", "hostel",
 }
 
 _DESTINATION_ALIASES = {
@@ -93,7 +93,7 @@ _EXTRACT_PRICES_PROMPT = """Ти — фінансовий аналітик ту�
 8. flight_is_per_person: true, якщо менеджер чітко сказав "за особу/на людину", інакше false.
 9. hotel_prices: СЛОВНИК, де ключ - це назва готелю, а значення - загальна ціна за номер (тільки число). КРИТИЧНО: Витягни ціни для ВСІХ готелів у тексті! Якщо їх 15, має бути 15 цін. Не зупиняйся на півдорозі.
 10. hotel_stars: список зірковості.
-11. baggage_info: опис багажу/пріоріті, напр: "багаж 20кг", "пріоріті", "додаткова ручна поклажа 10кг", або null якщо не згадано. УВАГА: Тут пишемо ТІЛЬКИ опис (текст).
+11. baggage_info: опис багажу/пріоріті, напр: "багаж 20кг", "пріоріті", "додаткова ручна поклажа 10кг", або null якщо не згадано.
 12. extras: список додаткових послуг. Кожна послуга - це об'єкт:
     {"type": "transfer" | "excursion" | "priority" | "baggage" | "shuttle", "original_name": "назва з тексту", "price": <число в євро>, "is_per_person": <true/false>}
     ПРАВИЛА РОЗРАХУНКУ:
@@ -101,7 +101,7 @@ _EXTRACT_PRICES_PROMPT = """Ти — фінансовий аналітик ту�
     - В іншому випадку (навіть якщо це пріоріті) -> is_per_person: false.
     - Якщо вказано кількість та ціну за одиницю (наприклад, "2 багажі по 120 євро кожен"), ОБОВ'ЯЗКОВО перемнож їх і запиши ЗАГАЛЬНУ суму (240).
     - Більше ЖОДНИХ математичних дій не роби. Запиши ціну.
-    КРИТИЧНО ВАЖЛИВО: Якщо багаж або пріоріті має ЦІНУ, він ОБОВ'ЯЗКОВО повинен бути як окремий об'єкт у масиві extras із заповненим полем price! Не губи ціну багажу!
+    ОБОВ'ЯЗКОВО витягни ВСІ послуги (трансфери, пріоріті, екскурсії, багаж), про які згадав менеджер.
     Якщо нічого не згадано — порожній список [].
 
 ФОРМАТ: Тільки JSON.
@@ -316,6 +316,7 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
     max_score = 0.0
     # Strip [NOT_FOUND] if present
     query_name = hotel_name.replace("[NOT_FOUND]", "").strip()
+    query_strict = re.sub(r'\s*[1-5]\s*(?:\*|★)', '', query_name.lower()).strip()
     query = normalize_name(query_name)
     if not query:
         query = query_name.lower()
@@ -325,6 +326,12 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
     
     for h in db:
         db_name_orig = h['hotel']
+        
+        # 0. Exact strict match (ignoring case and stars)
+        db_strict = re.sub(r'\s*[1-5]\s*(?:\*|★)', '', db_name_orig.lower()).strip()
+        if query_strict and query_strict == db_strict:
+            return h, 2.0
+            
         db_name = normalize_name(db_name_orig)
         if not db_name:
             db_name = db_name_orig.lower()
@@ -385,7 +392,7 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
         
     return {"hotel": hotel_name, "link": "Посилання відсутнє ⚠️"}, 0.0
 
-def _build_hotel_candidates(user_text: str, relevant_hotels: list, limit: int = 150) -> list:
+def _build_hotel_candidates(user_text: str, relevant_hotels: list, limit: int = 250) -> list:
     if len(relevant_hotels) <= limit:
         return relevant_hotels
     
@@ -897,8 +904,8 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
     logger.info(f"Direct matching found: {direct_matched_hotels}")
 
     async def _do_targeted_extract(text_to_parse):
-        # NO MORE CHUNKING: Send the entire relevant hotels list
-        db_names = "\n".join([h['hotel'] for h in relevant_hotels])
+        # NO MORE CHUNKING: Send the candidates list to save context and speed up
+        db_names = "\n".join([h['hotel'] for h in candidate_hotels])
         extraction_content = f"ТЕКСТ МЕНЕДЖЕРА:\n{text_to_parse}\n\nНАПРЯМОК: {clean_dest_name}\n\nБАЗА:\n{db_names}"
         
         if expected_count > 0:
@@ -988,11 +995,11 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
                         recovered_hotels[i] = h['hotel']
                         break
         
-        # Filter out None and sort by appearance in text
-        extracted_hotels = _sort_hotels_by_appearance([h for h in recovered_hotels if h is not None], hotel_search_text)
+        # Filter out None and keep the original LLM order
+        extracted_hotels = [h for h in recovered_hotels if h is not None]
     else:
-        # Sort extracted hotels by their appearance in text
-        extracted_hotels = _sort_hotels_by_appearance(extracted_hotels, hotel_search_text)
+        # Keep extracted hotels in their original LLM order
+        pass
     
     # Final sync and price extraction refinement
     hotel_prices_map = price_data.get("hotel_prices", {}) if price_data else {}
@@ -1281,20 +1288,29 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
             intro = "\n".join(intro_lines).strip()
             recommendations_raw = "\n".join(recommendation_lines).strip()
         
-        # Жорсткий контроль екскурсійної програми
+        # Жорсткий контроль екскурсійної програми та трансферів
         text_for_check = (user_text + " " + (raw_voice_text or "")).lower()
         has_excursion = "екскурс" in text_for_check
+        has_transfer = "трансфер" in text_for_check
+        has_shuttle = "шатл" in text_for_check or "shuttle" in text_for_check
         
         intro_lines_split = intro.split("\n")
         new_intro_lines = []
         excursion_present = False
         
         for line in intro_lines_split:
-            if "екскурс" in line.lower() or "⭐️ екскурсійна" in line.lower():
+            line_lower = line.lower()
+            if "екскурс" in line_lower or "⭐️ екскурсійна" in line_lower:
                 if has_excursion:
                     excursion_present = True
                     new_intro_lines.append(line)
                 # Якщо не казав, а LLM додала - рядок просто видаляється
+            elif "трансфер" in line_lower or "🚖 індивідуальний" in line_lower:
+                if has_transfer:
+                    new_intro_lines.append(line)
+            elif "шатл" in line_lower or "shuttle" in line_lower or "🚍 шатл" in line_lower:
+                if has_shuttle:
+                    new_intro_lines.append(line)
             else:
                 new_intro_lines.append(line)
                 
