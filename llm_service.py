@@ -137,8 +137,6 @@ _FORMAT_PROMPT = """Ти — професійний тревел-дизайне�
 
 Якщо ви шукаєте щось більш активне, BLUESEA Costa Verde стане чудовим вибором. Цей готель пропонує безліч розваг...
 
-(порожній рядок між рекомендаціями)
-
 ПРАВИЛА:
 1. Поверни ТІЛЬКИ Вступ та Рекомендації.
 2. Використовуй роздільник "===END_INTRO===" між Вступом та Рекомендаціями.
@@ -307,6 +305,9 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
             
         # Normalize unicode to remove accents (e.g. Barceló -> Barcelo)
         cleaned = ''.join(c for c in unicodedata.normalize('NFD', cleaned) if unicodedata.category(c) != 'Mn')
+        
+        # Remove quotes to merge S'Estalrica -> SEstalrica
+        cleaned = re.sub(r'[\'’`]', '', cleaned)
             
         # Remove common separators and noise
         cleaned = re.sub(r'[^a-z0-9\s]', ' ', cleaned)
@@ -343,15 +344,25 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
             return h, 1.5 # Increased bonus for exact match
 
         # 2. SequenceMatcher score
-        ratio = difflib.SequenceMatcher(None, query, db_name).ratio()
+        ratio1 = difflib.SequenceMatcher(None, query, db_name).ratio()
+        ratio2 = difflib.SequenceMatcher(None, query.replace(" ", ""), db_name.replace(" ", "")).ratio()
+        ratio = max(ratio1, ratio2)
         
         # 3. Word overlap bonus
         db_words = set(re.findall(r'\w+', db_name))
         db_brands = db_words & BRANDS
         if not query_words: continue
         
-        overlap_words = query_words & db_words
-        overlap = len(overlap_words)
+        overlap = 0
+        for qw in query_words:
+            if qw in db_words:
+                overlap += 1
+            else:
+                for dw in db_words:
+                    if len(qw) >= 3 and len(dw) >= 3 and (qw in dw or dw in qw or difflib.SequenceMatcher(None, qw, dw).ratio() > 0.85):
+                        overlap += 1
+                        break
+                        
         overlap_ratio = overlap / len(query_words) if query_words else 0
 
         # Weighted score: overlap is more important for identifying the right hotel
