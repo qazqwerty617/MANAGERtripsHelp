@@ -848,6 +848,30 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
 
     broad_hotel_task = asyncio.create_task(_extract_hotels_broadly(hotel_search_text))
     
+    async def _do_targeted_extract(text_to_parse):
+        dest_val = await dest_task
+        c_dest = "Unknown"
+        if dest_val:
+            c_dest = re.sub(r'\s*\d+\s*стр.*', '', dest_val, flags=re.IGNORECASE).strip().title()
+        
+        extraction_content = f"ТЕКСТ МЕНЕДЖЕРА:\n{text_to_parse}\n\nНАПРЯМОК: {c_dest}"
+        
+        raw = await _call_llm_with_retry(
+            messages=[{"role": "system", "content": _EXTRACT_PROMPT}, {"role": "user", "content": extraction_content}],
+            models=["openai/gpt-4o-mini", "google/gemini-2.5-flash"],
+            timeout=60,
+            max_tokens=1500,
+            response_format={"type": "json_object"}
+        )
+        if raw:
+            try:
+                raw_list = json.loads(raw).get("hotels", [])
+                return [h for h in raw_list if not re.match(r'^\d+\s*(?:євро|euro|евро)$', h.replace("[NOT_FOUND]", "").strip().lower())]
+            except: pass
+        return []
+
+    targeted_hotel_task = asyncio.create_task(_do_targeted_extract(hotel_search_text))
+    
     # Wait for first-round tasks
     if cleanup_task:
         user_text = await cleanup_task
@@ -915,33 +939,7 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
     
     logger.info(f"Direct matching found: {direct_matched_hotels}")
 
-    async def _do_targeted_extract(text_to_parse):
-        extraction_content = f"ТЕКСТ МЕНЕДЖЕРА:\n{text_to_parse}\n\nНАПРЯМОК: {clean_dest_name}"
-        
-        raw = await _call_llm_with_retry(
-            messages=[{"role": "system", "content": _EXTRACT_PROMPT}, {"role": "user", "content": extraction_content}],
-            models=["openai/gpt-4o-mini", "google/gemini-2.5-flash"],
-            timeout=60, # Increased timeout for larger context
-            max_tokens=1500,
-            response_format={"type": "json_object"}
-        )
-        if raw:
-            try:
-                return json.loads(raw).get("hotels", [])
-            except: pass
-        return []
-
-    extracted_hotels = await _do_targeted_extract(hotel_search_text)
-    
-    # NEW: Filter out hallucinatory hotel names like "100 євро"
-    filtered_hotels = []
-    for h in extracted_hotels:
-        h_test = h.replace("[NOT_FOUND]", "").strip().lower()
-        if re.match(r'^\d+\s*(?:євро|euro|евро)$', h_test):
-            continue
-        filtered_hotels.append(h)
-    extracted_hotels = filtered_hotels
-    
+    extracted_hotels = await targeted_hotel_task
     logger.info(f"LLM extracted {len(extracted_hotels)} hotels: {extracted_hotels}")
     
     # Merge broad extraction results ONLY if the LLM found very few hotels and we expect more
