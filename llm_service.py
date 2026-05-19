@@ -3,6 +3,7 @@ import logging
 import json
 import re
 import difflib
+import unicodedata
 from openai import AsyncOpenAI
 from config import OPENROUTER_API_KEY, GROQ_API_KEY, GROQ_API_KEYS
 from excel_parser import get_hotel_db, get_tourist_tax_db, get_tax_per_person_per_night, get_tax_info
@@ -303,6 +304,9 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
                 normalized_tokens.append(token)
         
         cleaned = " ".join(normalized_tokens)
+            
+        # Normalize unicode to remove accents (e.g. Barceló -> Barcelo)
+        cleaned = ''.join(c for c in unicodedata.normalize('NFD', cleaned) if unicodedata.category(c) != 'Mn')
             
         # Remove common separators and noise
         cleaned = re.sub(r'[^a-z0-9\s]', ' ', cleaned)
