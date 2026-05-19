@@ -57,7 +57,7 @@ _DESTINATION_ALIASES = {
 }
 
 # Brands for strict matching (Global for all functions)
-BRANDS = {"bluesea", "hipotels", "globales", "iberostar", "rixos", "mitsis", "grecotel", "sol", "melia", "hsm", "azuline", "bj", "bg", "thb", "bahia", "palladium", "h10", "riu", "barcelo", "occidental", "allegro", "viva", "zafiro", "js", "bjs", "mar"}
+BRANDS = {"bluesea", "hipotels", "globales", "iberostar", "rixos", "mitsis", "grecotel", "sol", "melia", "hsm", "azuline", "bj", "bg", "thb", "bahia", "palladium", "h10", "riu", "barcelo", "occidental", "allegro", "viva", "zafiro", "js", "bjs", "mar", "4r"}
 
 _DESTINATION_PROMPT = """Ти — туристичний асистент. Тобі надіслали текст-чернетку від менеджера з описом туру.
 Твоє завдання: визначити напрямок (країну/острів/регіон) з тексту і вибрати один найбільш підходящий варіант із наданого списку доступних напрямків.
@@ -361,6 +361,9 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
                 score -= 1.0 # Brand conflict (e.g. Riu vs Iberostar)
             else:
                 score += 0.4 # Brands matched
+        elif query_brands and not db_brands:
+            # If the user specified a brand, but the DB name has NO brand, it's very likely a different hotel.
+            score -= 0.6
         # If manager forgot the brand, no penalty anymore to prevent filtering out correct hotels
         
         # UNIQUE WORD BONUS (e.g. "Playamar", "Java", "Isabel")
@@ -377,6 +380,12 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
             extra_words = unique_query_words - unique_db_words
             if extra_words:
                 score -= len(extra_words) * 0.2 # Lowered from 0.7 to allow extra words like "Lifestyle" or "Beach"
+                
+            # Additional penalty if DB has extra unique words that query completely lacks
+            # This prevents matching "Playa Park Zensation" to just "Riu Playa Park"
+            db_extra_words = unique_db_words - unique_query_words
+            if db_extra_words:
+                score -= len(db_extra_words) * 0.2
 
         # Penalty for large length difference
         len_diff = abs(len(query) - len(db_name))
@@ -387,7 +396,7 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
             max_score = score
             best_match = h
             
-    if best_match and max_score >= 0.90: # Strict 95%+ similarity required
+    if best_match and max_score >= 1.0: # Strict: allows 1-2 char typos, rejects wrong hotels
         return best_match, max_score
         
     return {"hotel": hotel_name, "link": "Посилання відсутнє ⚠️"}, 0.0
@@ -1019,22 +1028,22 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
     # Matching extracted names with DB to get links and full names
     for h_name in extracted_hotels:
         match, score = fuzzy_match_hotel(h_name, relevant_hotels)
-        if score < 0.65 and all_hotels_list:
+        if score < 1.0 and all_hotels_list:
             global_match, g_score = fuzzy_match_hotel(h_name, all_hotels_list)
-            if g_score > 0.65:
+            if g_score >= 1.0:
                 match, score = global_match, g_score
         
         display_name = match["hotel"]
         stars = _extract_allowed_stars(display_name)
         display_name = re.sub(r'\s*[1-5]\s*(?:\*|★)', '', display_name).strip()
 
-        if score >= 0.90:
-            # We found a match
+        if score >= 1.0:
+            # We found a confident match
             pass
         elif "[NOT_FOUND]" in h_name:
             display_name = h_name.replace("[NOT_FOUND]", "").strip() + " ⚠️"
             match = {"hotel": display_name, "link": "Посилання відсутнє ⚠️"}
-        elif score < 0.90:
+        elif score < 1.0:
             display_name = f"{h_name} ⚠️"
             match = {"hotel": display_name, "link": "Посилання відсутнє ⚠️"}
 
