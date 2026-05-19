@@ -917,9 +917,6 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
     async def _do_targeted_extract(text_to_parse):
         extraction_content = f"ТЕКСТ МЕНЕДЖЕРА:\n{text_to_parse}\n\nНАПРЯМОК: {clean_dest_name}"
         
-        if expected_count > 0:
-            extraction_content += f"\n\nВАЖЛИВО: Я очікую знайти РІВНО {expected_count} готелів."
-        
         raw = await _call_llm_with_retry(
             messages=[{"role": "system", "content": _EXTRACT_PROMPT}, {"role": "user", "content": extraction_content}],
             models=["openai/gpt-4o-mini", "google/gemini-2.5-flash"],
