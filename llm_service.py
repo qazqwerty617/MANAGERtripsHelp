@@ -841,7 +841,8 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         )
         if raw:
             try:
-                return json.loads(raw).get("hotels", [])
+                raw_list = json.loads(raw).get("hotels", [])
+                return [h for h in raw_list if not re.match(r'^\d+\s*(?:євро|euro|евро)$', h.replace("[NOT_FOUND]", "").strip().lower())]
             except: pass
         return []
 
@@ -931,6 +932,16 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         return []
 
     extracted_hotels = await _do_targeted_extract(hotel_search_text)
+    
+    # NEW: Filter out hallucinatory hotel names like "100 євро"
+    filtered_hotels = []
+    for h in extracted_hotels:
+        h_test = h.replace("[NOT_FOUND]", "").strip().lower()
+        if re.match(r'^\d+\s*(?:євро|euro|евро)$', h_test):
+            continue
+        filtered_hotels.append(h)
+    extracted_hotels = filtered_hotels
+    
     logger.info(f"LLM extracted {len(extracted_hotels)} hotels: {extracted_hotels}")
     
     # Merge broad extraction results ONLY if the LLM found very few hotels and we expect more
@@ -984,8 +995,9 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         for i in range(expected_count):
             if recovered_hotels[i] is not None: continue
             
-            # Try to find a hotel that is mentioned near "i+1 готель"
-            ordinal_pattern = rf"(?:{i+1}|{['перший','другий','третій','четвертий','п’ятий','шостий','сьомий','восьмий','дев’ятий','десятий'][i]})\s*(?:готель|отель|варіант)"
+            ordinal_words = ['перший','другий','третій','четвертий','п’ятий','шостий','сьомий','восьмий','дев’ятий','десятий']
+            ordinal_word = ordinal_words[i] if i < len(ordinal_words) else str(i+1)
+            ordinal_pattern = rf"(?:{i+1}|{ordinal_word})\s*(?:готель|отель|варіант)"
             context_match = re.search(ordinal_pattern + r"(.*?)(?:\d+\s*(?:готель|отель|варіант)|$)", text_lower, re.DOTALL)
             
             if context_match:
