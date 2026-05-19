@@ -26,7 +26,7 @@ client = AsyncOpenAI(
 _NOISE_TOKENS = {
     "hotel", "hotels", "apartments", "apartment", "apartamentos", "apartamento",
     "resort", "spa", "villas", "villa", "the", "by", "and", "suites", "suite",
-    "hostal", "pension", "hostel",
+    "hostal", "pension", "hostel", "a", "of", "member", "adults", "only", "concept", "club", "boutique", "village"
 }
 
 _DESTINATION_ALIASES = {
@@ -387,7 +387,7 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
             # This prevents matching "Playa Park Zensation" to just "Riu Playa Park"
             db_extra_words = unique_db_words - unique_query_words
             if db_extra_words:
-                score -= len(db_extra_words) * 0.2
+                score -= len(db_extra_words) * 0.05
 
         # Penalty for large length difference
         len_diff = abs(len(query) - len(db_name))
