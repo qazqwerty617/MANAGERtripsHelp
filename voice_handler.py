@@ -41,7 +41,7 @@ VOICE_CLEANUP_PROMPT = """Ти — коректор туристичних те�
    2 готель - [назва] зі [харчуванням] [ціна] євро за номер
 3. КІЛЬКІСТЬ: Якщо ти чуєш N окремих назв готелів — має бути N рядків. Якщо згадано "перший", "другий"... "восьмий" — має бути 8 готелів.
 4. РОЗДІЛЯЙ ГОТЕЛІ: Якщо кілька назв йдуть поспіль без нумерації — кожна назва це ОКРЕМИЙ готель. Наприклад: "Canvas 700 Porto 800 Domes 1000" = 3 окремих готелі.
-5. ВИПРАВ транслітерацію: "Blau C", "блюсі/блю сі" → "BLUESEA", "глобаліс" → "Globales", "іберостар" → "Iberostar", "азулін" → "AzuLine", "ріксос" → "Rixos", "мітсіс" → "Mitsis", "грекотель" → "Grecotel", "акуалія/аквіла" → "Aquila", "ноелія" → "GF Noelia".
+5. ВИПРАВ транслітерацію: "Blau C", "BluSea", "блюсі/блю сі" → "BLUESEA", "Marzas" → "Marthas", "Ses Cades" → "Ses Cases", "S Bolero" → "Es Bolero", "глобаліс" → "Globales", "іберостар" → "Iberostar", "азулін" → "AzuLine", "ріксос" → "Rixos", "мітсіс" → "Mitsis", "грекотель" → "Grecotel", "акуалія/аквіла" → "Aquila", "ноелія" → "GF Noelia".
 6. ХАРЧУВАННЯ: Не видаляй тип харчування (сніданки, все включено тощо).
 7. НЕ ВИГАДУЙ назви готелів, яких не було в тексті!
 8. Все крім готелів (дати, рейси, ціна авіа, послуги) — залиш одним абзацом на початку.
@@ -112,6 +112,10 @@ def apply_phonetic_fixes(text: str) -> str:
         return text
     fixes = {
         "Blau C": "BLUESEA", "blau c": "BLUESEA", "Blau c": "BLUESEA", "BlauC": "BLUESEA",
+        "BluSea": "BLUESEA", "blusea": "BLUESEA", "Blusea": "BLUESEA",
+        "Marzas": "Marthas", "marzas": "Marthas",
+        "Ses Cades": "Ses Cases", "ses cades": "Ses Cases",
+        " S Bolero": " Es Bolero", " s bolero": " Es Bolero",
         "блюсія": "BLUESEA", "блю сі": "BLUESEA", "Блюсія": "BLUESEA", "Блю сі": "BLUESEA",
         "глобаліс": "Globales", "Глобаліс": "Globales",
         "плеймар": "Playamar", "Плеймар": "Playamar",
