@@ -852,6 +852,16 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
     dest_task = asyncio.create_task(_detect_destination(hotel_search_text))
     meal_task = asyncio.create_task(_extract_meals(user_text, fast_models))
     
+    def is_hallucinated_price(h_name):
+        h_name = h_name.replace("[NOT_FOUND]", "").lower()
+        # Remove all numbers and non-alphabet characters
+        letters_only = re.sub(r'[^a-zа-яієїґ]', '', h_name)
+        # Remove currency words
+        for c in ['євро', 'евро', 'euro', 'eur', 'usd', 'дол']:
+            letters_only = letters_only.replace(c, '')
+        # If nothing is left (e.g. it was just "100 євро." or "100"), it's a price hallucination
+        return len(letters_only.strip()) == 0
+        
     async def _extract_hotels_broadly(text):
         raw = await _call_llm_with_retry(
             messages=[{"role": "system", "content": _EXTRACT_PROMPT}, {"role": "user", "content": f"ТЕКСТ МЕНЕДЖЕРА:\n{text}\n\nЗнайди всі готелі."}],
@@ -862,7 +872,7 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         if raw:
             try:
                 raw_list = json.loads(raw).get("hotels", [])
-                return [h for h in raw_list if not re.match(r'^\d+\s*(?:євро|euro|евро)$', h.replace("[NOT_FOUND]", "").strip().lower())]
+                return [h for h in raw_list if not is_hallucinated_price(h)]
             except: pass
         return []
 
@@ -886,7 +896,7 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         if raw:
             try:
                 raw_list = json.loads(raw).get("hotels", [])
-                return [h for h in raw_list if not re.match(r'^\d+\s*(?:євро|euro|евро)$', h.replace("[NOT_FOUND]", "").strip().lower())]
+                return [h for h in raw_list if not is_hallucinated_price(h)]
             except: pass
         return []
 
