@@ -208,7 +208,7 @@ async def cleanup_transcribed_text(raw_text: str, destination_hotels: list = Non
     # Build context with hotel names if available
     user_content = raw_text
     if destination_hotels:
-        hotel_names = "\n".join([h['hotel'] for h in destination_hotels[:100]])
+        hotel_names = "\n".join([h['hotel'] for h in destination_hotels])
         user_content = f"ТЕКСТ З ГОЛОСОВОГО:\n{raw_text}\n\nДОВІДНИК ГОТЕЛІВ (використай для виправлення назв):\n{hotel_names}"
     
     for model in VOICE_CLEANUP_MODELS:
