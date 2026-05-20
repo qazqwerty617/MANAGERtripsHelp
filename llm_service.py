@@ -381,22 +381,31 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
         
         # UNIQUE WORD BONUS (e.g. "Playamar", "Java", "Isabel")
         # Words that are NOT brands and NOT common noise
-        unique_query_words = query_words - BRANDS
-        unique_db_words = db_words - BRANDS
-        unique_overlap = len(unique_query_words & unique_db_words)
+        unique_query_words = query_words - BRANDS - _NOISE_TOKENS
+        unique_db_words = db_words - BRANDS - _NOISE_TOKENS
+        
+        unique_overlap = 0
+        matched_db_words = set()
+        for qw in unique_query_words:
+            if qw in unique_db_words:
+                unique_overlap += 1
+                matched_db_words.add(qw)
+            else:
+                for dw in unique_db_words:
+                    if len(qw) >= 3 and len(dw) >= 3 and (qw in dw or dw in qw or difflib.SequenceMatcher(None, qw, dw).ratio() > 0.85):
+                        unique_overlap += 1
+                        matched_db_words.add(dw)
+                        break
+
         if unique_query_words:
             unique_ratio = unique_overlap / len(unique_query_words)
             score += unique_ratio * 0.7 # Increased bonus
             
-            # Additional penalty if query has unique words that are NOT in DB name
-            # (e.g. Query="Blue Sea Cala Millor", DB="Cala Millor Garden")
-            extra_words = unique_query_words - unique_db_words
+            extra_words = unique_query_words - matched_db_words
             if extra_words:
-                score -= len(extra_words) * 0.2 # Lowered from 0.7 to allow extra words like "Lifestyle" or "Beach"
+                score -= len(extra_words) * 0.2
                 
-            # Additional penalty if DB has extra unique words that query completely lacks
-            # This prevents matching "Playa Park Zensation" to just "Riu Playa Park"
-            db_extra_words = unique_db_words - unique_query_words
+            db_extra_words = unique_db_words - matched_db_words
             if db_extra_words:
                 score -= len(db_extra_words) * 0.05
 
