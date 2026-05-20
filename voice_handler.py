@@ -41,7 +41,7 @@ VOICE_CLEANUP_PROMPT = """Ти — коректор туристичних те�
    2 готель - [назва] зі [харчуванням] [ціна] євро за номер
 3. КІЛЬКІСТЬ: Якщо ти чуєш N окремих назв готелів — має бути N рядків. Якщо згадано "перший", "другий"... "восьмий" — має бути 8 готелів.
 4. РОЗДІЛЯЙ ГОТЕЛІ: Якщо кілька назв йдуть поспіль без нумерації — кожна назва це ОКРЕМИЙ готель. Наприклад: "Canvas 700 Porto 800 Domes 1000" = 3 окремих готелі.
-5. ВИПРАВ транслітерацію: "блюсі/блю сі" → "BLUESEA", "глобаліс" → "Globales", "іберостар" → "Iberostar", "азулін" → "AzuLine", "ріксос" → "Rixos", "мітсіс" → "Mitsis", "грекотель" → "Grecotel", "акуалія/аквіла" → "Aquila", "ноелія" → "GF Noelia".
+5. ВИПРАВ транслітерацію: "Blau C", "блюсі/блю сі" → "BLUESEA", "глобаліс" → "Globales", "іберостар" → "Iberostar", "азулін" → "AzuLine", "ріксос" → "Rixos", "мітсіс" → "Mitsis", "грекотель" → "Grecotel", "акуалія/аквіла" → "Aquila", "ноелія" → "GF Noelia".
 6. ХАРЧУВАННЯ: Не видаляй тип харчування (сніданки, все включено тощо).
 7. НЕ ВИГАДУЙ назви готелів, яких не було в тексті!
 8. Все крім готелів (дати, рейси, ціна авіа, послуги) — залиш одним абзацом на початку.
@@ -107,13 +107,11 @@ async def _transcribe_with_gemini(file_bytes: bytes) -> str:
         logger.warning(f"Gemini transcription failed: {e}")
     return None
 
-async def _transcribe_with_whisper(file_bytes: bytes) -> str:
-    """Fallback: Transcribe using Groq Whisper."""
-    active_keys = GROQ_API_KEYS if GROQ_API_KEYS else ([GROQ_API_KEY] if GROQ_API_KEY else [])
-    if not active_keys:
-        return None
-    
+def apply_phonetic_fixes(text: str) -> str:
+    if not text:
+        return text
     fixes = {
+        "Blau C": "BLUESEA", "blau c": "BLUESEA", "Blau c": "BLUESEA", "BlauC": "BLUESEA",
         "блюсія": "BLUESEA", "блю сі": "BLUESEA", "Блюсія": "BLUESEA", "Блю сі": "BLUESEA",
         "глобаліс": "Globales", "Глобаліс": "Globales",
         "плеймар": "Playamar", "Плеймар": "Playamar",
@@ -124,6 +122,15 @@ async def _transcribe_with_whisper(file_bytes: bytes) -> str:
         "акуаліа": "Aquila", "Акуаліа": "Aquila",
         "аквіла": "Aquila", "Аквіла": "Aquila",
     }
+    for bad, good in fixes.items():
+        text = text.replace(bad, good)
+    return text
+
+async def _transcribe_with_whisper(file_bytes: bytes) -> str:
+    """Fallback: Transcribe using Groq Whisper."""
+    active_keys = GROQ_API_KEYS if GROQ_API_KEYS else ([GROQ_API_KEY] if GROQ_API_KEY else [])
+    if not active_keys:
+        return None
     
     for _ in range(len(active_keys)):
         key = next(_groq_key_rotator)
@@ -144,9 +151,7 @@ async def _transcribe_with_whisper(file_bytes: bytes) -> str:
                 if resp.status_code == 200:
                     text = resp.json().get("text", "")
                     if text:
-                        for bad, good in fixes.items():
-                            text = text.replace(bad, good)
-                        return text
+                        return apply_phonetic_fixes(text)
                 logger.warning(f"Groq key {key[:10]}... returned status {resp.status_code}.")
             except Exception as e:
                 logger.warning(f"Groq key {key[:10]}... failed: {e}")
@@ -159,7 +164,7 @@ async def transcribe_voice(file_bytes: bytes) -> str:
     # 1. Try Gemini first — much better at understanding context and mixed languages
     gemini_text = await _transcribe_with_gemini(file_bytes)
     if gemini_text:
-        return gemini_text
+        return apply_phonetic_fixes(gemini_text)
     
     # 2. Fallback to Whisper on Groq
     logger.info("Gemini failed, falling back to Whisper...")
@@ -183,7 +188,7 @@ async def transcribe_voice(file_bytes: bytes) -> str:
                 if resp.status_code == 200:
                     text = resp.json().get("text", "")
                     if text:
-                        return text
+                        return apply_phonetic_fixes(text)
         except Exception as e:
             logger.error(f"OpenRouter Whisper fallback failed: {e}")
     
