@@ -386,22 +386,25 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
         
         unique_overlap = 0
         matched_db_words = set()
+        matched_query_words = set()
         for qw in unique_query_words:
             if qw in unique_db_words:
                 unique_overlap += 1
                 matched_db_words.add(qw)
+                matched_query_words.add(qw)
             else:
                 for dw in unique_db_words:
                     if len(qw) >= 3 and len(dw) >= 3 and (qw in dw or dw in qw or difflib.SequenceMatcher(None, qw, dw).ratio() > 0.85):
                         unique_overlap += 1
                         matched_db_words.add(dw)
+                        matched_query_words.add(qw)
                         break
 
         if unique_query_words:
             unique_ratio = unique_overlap / len(unique_query_words)
             score += unique_ratio * 0.7 # Increased bonus
             
-            extra_words = unique_query_words - matched_db_words
+            extra_words = unique_query_words - matched_query_words
             if extra_words:
                 score -= len(extra_words) * 0.2
                 
@@ -1063,7 +1066,13 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
     prices_dict = price_data.get("hotel_prices", {}) if price_data else {}
     
     # Matching extracted names with DB to get links and full names
-    for h_name in extracted_hotels:
+    for i in range(len(extracted_hotels)):
+        h_name = extracted_hotels[i]
+        # Clean LLM artifacts like "1) ", "1. ", "- " that break fuzzy matching
+        h_name = re.sub(r'^\s*\d+[\)\.]\s*', '', h_name).strip()
+        h_name = re.sub(r'^\s*-\s*', '', h_name).strip()
+        extracted_hotels[i] = h_name
+        
         match, score = fuzzy_match_hotel(h_name, relevant_hotels)
         if score < 1.0 and all_hotels_list:
             global_match, g_score = fuzzy_match_hotel(h_name, all_hotels_list)
