@@ -15,15 +15,22 @@ _db_cache = {
     "file_mtime": 0
 }
 
+def _get_excel_path() -> str:
+    uploaded_path = EXCEL_PATH.replace("tours.xlsx", "tours_uploaded.xlsx")
+    if os.path.exists(uploaded_path):
+        return uploaded_path
+    return EXCEL_PATH
+
 def get_hotel_db() -> Dict[str, List[Dict[str, str]]]:
     global _db_cache
     
-    if not os.path.exists(EXCEL_PATH):
-        logger.warning(f"Excel file not found at {EXCEL_PATH}")
+    excel_path = _get_excel_path()
+    if not os.path.exists(excel_path):
+        logger.warning(f"Excel file not found at {excel_path}")
         return {}
 
     # Check if we can use cache
-    current_mtime = os.path.getmtime(EXCEL_PATH)
+    current_mtime = os.path.getmtime(excel_path)
     if (_db_cache["data"] is not None and 
         _db_cache["file_mtime"] == current_mtime and 
         time.time() - _db_cache["last_loaded"] < 3600): # 1 hour cache
@@ -32,7 +39,7 @@ def get_hotel_db() -> Dict[str, List[Dict[str, str]]]:
     try:
         # read_only=True DOES NOT support hyperlinks. We must use read_only=False.
         # data_only=False to see formulas like =HYPERLINK(...)
-        wb = openpyxl.load_workbook(EXCEL_PATH, data_only=False, read_only=False)
+        wb = openpyxl.load_workbook(excel_path, data_only=False, read_only=False)
         db = {}
 
         for sheet_name in wb.sheetnames:
@@ -121,10 +128,11 @@ def format_hotel_db_for_prompt() -> str:
 
 
 def get_tourist_tax_db() -> str:
-    if not os.path.exists(EXCEL_PATH):
+    excel_path = _get_excel_path()
+    if not os.path.exists(excel_path):
         return ""
     try:
-        wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True, read_only=False)
+        wb = openpyxl.load_workbook(excel_path, data_only=True, read_only=False)
         tax_md = []
         for sheet_name in wb.sheetnames:
             if "ПОДАТОК" in sheet_name.upper():
@@ -209,7 +217,8 @@ def get_tax_info(destination: str, stars: int, month: int) -> Dict:
     Returns {'rate': 0.0, 'per_room': False, 'resort': ''}
     """
     res = {'rate': 0.0, 'per_room': False, 'resort': ''}
-    if not os.path.exists(EXCEL_PATH):
+    excel_path = _get_excel_path()
+    if not os.path.exists(excel_path):
         return res
     try:
         dest_lower = destination.lower()
@@ -222,7 +231,7 @@ def get_tax_info(destination: str, stars: int, month: int) -> Dict:
         if not resort_name:
             resort_name = destination.strip().lower()
 
-        wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True, read_only=False)
+        wb = openpyxl.load_workbook(excel_path, data_only=True, read_only=False)
         for sheet_name in wb.sheetnames:
             if "ПОДАТОК" not in sheet_name.upper():
                 continue

@@ -1,12 +1,12 @@
 import openpyxl
 import sys
-from config import EXCEL_PATH
+from excel_parser import _get_excel_path
 
 # Set stdout to utf-8 for windows terminal
 sys.stdout.reconfigure(encoding='utf-8')
 
 def dump_tax_sheet():
-    wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
+    wb = openpyxl.load_workbook(_get_excel_path(), data_only=True)
     for sheet_name in wb.sheetnames:
         if "ПОДАТОК" in sheet_name.upper():
             ws = wb[sheet_name]

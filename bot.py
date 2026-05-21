@@ -72,16 +72,17 @@ async def handle_document(message: Message):
     msg = await message.answer("⏳ Завантажую та перевіряю нову базу готелів...")
     try:
         file_info = await bot.get_file(doc.file_id)
-        os.makedirs(os.path.dirname(EXCEL_PATH), exist_ok=True)
-        await bot.download_file(file_info.file_path, EXCEL_PATH)
+        uploaded_path = EXCEL_PATH.replace("tours.xlsx", "tours_uploaded.xlsx")
+        os.makedirs(os.path.dirname(uploaded_path), exist_ok=True)
+        await bot.download_file(file_info.file_path, uploaded_path)
         
         # Invalidate cache
         excel_parser._db_cache["data"] = None
         
-        # Test loading
+        # Test loading (this will also warm up the cache instantly!)
         db = excel_parser.get_hotel_db()
         if db:
-            await msg.edit_text(f"✅ Базу успішно оновлено! Знайдено {len(db)} напрямків.")
+            await msg.edit_text(f"✅ Базу успішно оновлено та проіндексовано! Знайдено {len(db)} напрямків.")
         else:
             await msg.edit_text("⚠️ Файл завантажено, але він здається порожнім або має невірний формат.")
             
