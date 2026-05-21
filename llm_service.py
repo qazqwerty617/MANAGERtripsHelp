@@ -267,6 +267,11 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
         # Remove stars from name for better matching
         cleaned = re.sub(r'[1-5]\s*(?:\*|★)', '', name.lower())
         
+        # Замінюємо сполучники (&, and, та, и, й, энд, енд) на пробіли, щоб уникнути розбіжностей
+        cleaned = re.sub(r'\s+(?:&|and|энд|енд|та|и|i|й)\s+', ' ', cleaned)
+        # Також окремо замінюємо одиночний & (без великих пробілів)
+        cleaned = cleaned.replace('&', ' ')
+        
         # Simple Transliteration for Ukrainian/Russian names to Latin
         trans_map = {
             'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'ґ': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
@@ -1144,6 +1149,8 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
                 def normalize_for_price_matching(name_str: str) -> str:
                     name_str = name_str.lower()
                     name_str = re.sub(r'\s*[1-5]\s*(?:\*|★)', '', name_str)
+                    name_str = re.sub(r'\s+(?:&|and|энд|енд|та|и|i|й)\s+', ' ', name_str)
+                    name_str = name_str.replace('&', ' ')
                     name_str = re.sub(r'[^a-zа-яіїєґ0-9\s]', ' ', name_str)
                     words = name_str.split()
                     generic_words = {"hotel", "resort", "beach", "spa", "village", "apartments", "apartamentos", "suites", "boutique", "готель", "отель", "апартаменты"}
