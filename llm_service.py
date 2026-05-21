@@ -90,7 +90,7 @@ _EXTRACT_PRICES_PROMPT = """Ти — фінансовий аналітик ту�
 6. check_in_day: число місяця.
 7. flight_price: ЗАГАЛЬНА ціна авіа за всіх (число).
 8. flight_is_per_person: true, якщо менеджер чітко сказав "за особу/на людину", інакше false.
-9. hotel_prices: СЛОВНИК, де ключ - це назва готелю, а значення - загальна ціна за номер (тільки число). КРИТИЧНО: Витягни ціни для ВСІХ готелів у тексті! Якщо їх 15, має бути 15 цін. Не зупиняйся на півдорозі.
+9. hotel_prices: СЛОВНИК, де ключ - це назва готелю, а значення - загальна ціна за номер (тільки число). КРИТИЧНО: Ключі (назви готелів) у словнику повинні бути записані СИМВОЛ-В-СИМВОЛ точно так, як вони написані в тексті менеджера (зберігаючи всі одруківки та помилки, без жодних спроб виправити їх). Це потрібно для точного співпадіння. Витягни ціни для ВСІХ готелів у тексті! Якщо їх 15, має бути 15 цін. Не зупиняйся на півдорозі.
 10. hotel_stars: список зірковості.
 11. baggage_info: опис багажу/пріоріті, напр: "багаж 20кг", "пріоріті", "додаткова ручна поклажа 10кг", або null якщо не згадано.
 12. extras: список додаткових послуг. Кожна послуга - це об'єкт:
@@ -1116,38 +1116,71 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
                 pass
     else:
         # СУВОРИЙ МАПІНГ: Шукаємо ціну саме для цього готелю
-        for h_info in matched_hotels:
-            hotel_name = h_info['hotel'].replace("⚠️", "").strip()
-            # Clean stars/ratings from name for search
-            hotel_name = re.sub(r'\s*[1-5]\s*(?:\*|★)', '', hotel_name).strip()
+        for idx, h_info in enumerate(matched_hotels):
+            extracted_name = extracted_hotels[idx] if idx < len(extracted_hotels) else ""
+            db_name = h_info['hotel'].replace("⚠️", "").strip()
             
-            val = prices_dict.get(hotel_name, 0)
+            val = 0
             
-            # Нечіткий пошук у словнику, якщо ключ трохи відрізняється
+            # Очищуємо зірки для точного пошуку
+            clean_db_name = re.sub(r'\s*[1-5]\s*(?:\*|★)', '', db_name).strip()
+            clean_ext_name = re.sub(r'\s*[1-5]\s*(?:\*|★)', '', extracted_name).strip() if extracted_name else ""
+            
+            # 1. Спробуємо прямий пошук за очищеною назвою з тексту або бази
+            if clean_ext_name and clean_ext_name in prices_dict:
+                val = prices_dict[clean_ext_name]
+            elif clean_db_name in prices_dict:
+                val = prices_dict[clean_db_name]
+            elif extracted_name in prices_dict:
+                val = prices_dict[extracted_name]
+            elif db_name in prices_dict:
+                val = prices_dict[db_name]
+                
+            # 2. Якщо не знайшли точно, робимо нечітке порівняння ключів
             if not val and prices_dict:
                 best_match_key = None
-                best_score = 0
-                generic_words = {"hotel", "resort", "beach", "spa", "village", "apartments", "apartamentos", "suites", "boutique", "готель"}
-                n_norm_words = set(re.sub(r'[^a-zа-яіїєґ0-9\s]', ' ', hotel_name.lower()).split()) - generic_words
+                best_score = 0.0
+                
+                def normalize_for_price_matching(name_str: str) -> str:
+                    name_str = name_str.lower()
+                    name_str = re.sub(r'\s*[1-5]\s*(?:\*|★)', '', name_str)
+                    name_str = re.sub(r'[^a-zа-яіїєґ0-9\s]', ' ', name_str)
+                    words = name_str.split()
+                    generic_words = {"hotel", "resort", "beach", "spa", "village", "apartments", "apartamentos", "suites", "boutique", "готель", "отель", "апартаменты"}
+                    filtered_words = [w for w in words if w not in generic_words]
+                    return " ".join(filtered_words) if filtered_words else " ".join(words)
+
+                norm_db = normalize_for_price_matching(db_name)
+                norm_ext = normalize_for_price_matching(extracted_name) if extracted_name else ""
                 
                 for k, v in prices_dict.items():
-                    k_norm_str = re.sub(r'[^a-zа-яіїєґ0-9]', '', k.lower())
-                    n_norm_str = re.sub(r'[^a-zа-яіїєґ0-9]', '', hotel_name.lower())
-                    if k_norm_str in n_norm_str or n_norm_str in k_norm_str:
-                        best_match_key = k
-                        break
+                    norm_k = normalize_for_price_matching(k)
                     
-                    # Word overlap
-                    k_norm_words = set(re.sub(r'[^a-zа-яіїєґ0-9\s]', ' ', k.lower()).split()) - generic_words
-                    if k_norm_words and n_norm_words:
-                        overlap = len(k_norm_words & n_norm_words) / max(len(k_norm_words), len(n_norm_words))
-                        if overlap > best_score:
-                            best_score = overlap
-                            best_match_key = k
-                
-                if best_match_key and (best_score >= 0.35 or best_match_key == k):
-                    val = prices_dict[best_match_key]
+                    # Перевіряємо повне входження підстрок
+                    if norm_k and norm_db and (norm_k in norm_db or norm_db in norm_k):
+                        best_match_key = k
+                        best_score = 1.0
+                        break
+                    if norm_ext and norm_k and (norm_k in norm_ext or norm_ext in norm_k):
+                        best_match_key = k
+                        best_score = 1.0
+                        break
                         
+                    # Перевіряємо відносну схожість рядків
+                    if norm_db and norm_k:
+                        ratio_db = difflib.SequenceMatcher(None, norm_db, norm_k).ratio()
+                        if ratio_db > best_score:
+                            best_score = ratio_db
+                            best_match_key = k
+                    if norm_ext and norm_k:
+                        ratio_ext = difflib.SequenceMatcher(None, norm_ext, norm_k).ratio()
+                        if ratio_ext > best_score:
+                            best_score = ratio_ext
+                            best_match_key = k
+
+                if best_match_key and best_score >= 0.6:
+                    val = prices_dict[best_match_key]
+                    
             try:
                 p_clean = re.sub(r'[^\d.]', '', str(val).replace(',', '.'))
                 final_hotel_prices_raw.append(float(p_clean) if p_clean else 0.0)
@@ -1206,6 +1239,10 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         hotel_stars_list = price_data.get("hotel_stars") or []
         
         for idx, hotel_total in enumerate(final_hotel_prices_raw):
+            if hotel_total <= 0:
+                computed_prices.append("⚠️")
+                continue
+                
             stars_val = 0
             db_stars_str = _extract_allowed_stars(matched_hotels[idx]['hotel']) if idx < len(matched_hotels) else ""
             if db_stars_str:
@@ -1248,7 +1285,8 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         stars = _extract_allowed_stars(h['hotel'])
         meal = extracted_meals[i] if extracted_meals and i < len(extracted_meals) else "не вказано"
         price = computed_prices[i] if i < len(computed_prices) else "не вказано"
-        hotels_info.append(f"{i+1}) {h['hotel']} (ЗІРКИ: {stars if stars else 'немає'}) | Харчування: {meal} | Посилання: {h['link']} | ЦІНА: {price}€")
+        price_str = f"{price}€" if isinstance(price, (int, float)) else str(price)
+        hotels_info.append(f"{i+1}) {h['hotel']} (ЗІРКИ: {stars if stars else 'немає'}) | Харчування: {meal} | Посилання: {h['link']} | ЦІНА: {price_str}")
     
     db_text = "\n".join(hotels_info)
     
@@ -1273,9 +1311,13 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
             items.append(f"- {etype}: {ename}")
         extras_desc += f"\nДОДАТКОВІ ПОСЛУГИ ТЕКСТОМ:\n" + "\n".join(items)
     
+    price_strings_combined = []
+    for i, p in enumerate(computed_prices, 1):
+        price_strings_combined.append(f"{i}){p}€" if isinstance(p, (int, float)) else f"{i}){p}")
+        
     combined_content = f"ТЕКСТ МЕНЕДЖЕРА:\n{user_text}\n\nНАПРЯМОК: {clean_dest_name}\n\n"
     combined_content += f"БАЗА ГОТЕЛІВ ТА ЦІНИ (ВИКОРИСТОВУЙ ВСЕ):\n{db_text}\n{extras_desc}\n\n"
-    combined_content += f"РОЗРАХОВАНІ ЦІНИ (ДЛЯ РЯДКА З ЦІНАМИ):\n{price_label} - {', '.join([f'{i+1}){p}€' for i, p in enumerate(computed_prices)])}"
+    combined_content += f"РОЗРАХОВАНІ ЦІНИ (ДЛЯ РЯДКА З ЦІНАМИ):\n{price_label} - {', '.join(price_strings_combined)}"
 
     result = await _call_llm_with_retry(
         messages=[{"role": "system", "content": _FORMAT_PROMPT}, {"role": "user", "content": combined_content}],
@@ -1315,7 +1357,7 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         
         price_strings = []
         for i, p in enumerate(computed_prices, 1):
-            price_strings.append(f"{i}){p}€")
+            price_strings.append(f"{i}){p}€" if isinstance(p, (int, float)) else f"{i}){p}")
         footer_block += ", ".join(price_strings) + "\n\n"
         footer_block += "❗️Ціна актуальна на момент розрахунку подорожі\n\n"
 

@@ -72,12 +72,7 @@ GEMINI_TRANSCRIBE_PROMPT = """Транскрибуй це голосове по�
 3. СТРУКТУРА ТЕКСТУ: Менеджер зазвичай спочатку називає напрямок, дати, рейси, ціну авіа, потім перераховує готелі по порядку (перший готель, другий готель... або 1, 2, 3...).
 4. Кожен готель — окремий рядок з назвою, типом харчування та ціною.
 5. НЕ ДОДАВАЙ нічого від себе, НЕ ВИПРАВЛЯЙ назви готелів, просто запиши що чуєш.
-6. Якщо чутно нерозбірливо — запиши як чуєш, не пропускай.
-
-СЛОВНИК ЧАСТИХ НАЗВ ТА БРЕНДІВ (використовуй для кращого розпізнавання на слух):
-Майорка, Тенеріфе, Крит, Корфу, Родос, Кіпр, Ібіца, Коста-Брава, Фуертевентура, Лансароте, Гран-Канарія.
-BLUESEA, Globales, AzuLine, HSM, BJ Playamar, Iberostar, Rixos, Mitsis, Grecotel, H10, Riu, Barcelo, Sol, Melia, THB, Hipotels, Zafiro, Viva, Occidental, Allegro, Palladium, JS, Mar Hotels, Jumeirah, Can Simoneta, Castell Son Claret, The Lodge.
-"""
+6. Якщо чутно нерозбірливо — запиши як чуєш, не пропускай."""
 
 async def _transcribe_with_gemini(file_bytes: bytes) -> str:
     """Try transcribing voice using Gemini via OpenRouter (multimodal audio)."""
