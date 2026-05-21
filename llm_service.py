@@ -26,7 +26,8 @@ client = AsyncOpenAI(
 _NOISE_TOKENS = {
     "hotel", "hotels", "apartments", "apartment", "apartamentos", "apartamento",
     "resort", "spa", "villas", "villa", "the", "by", "and", "suites", "suite",
-    "hostal", "pension", "hostel", "a", "of", "member", "adults", "only", "concept", "club", "boutique", "village"
+    "hostal", "pension", "hostel", "a", "of", "member", "adults", "only", "concept", "club", "boutique", "village",
+    "beach"
 }
 
 _DESTINATION_ALIASES = {
@@ -1079,7 +1080,7 @@ async def format_tour_message(user_text: str, do_cleanup: bool = False, raw_voic
         extracted_hotels[i] = h_name
         
         match, score = fuzzy_match_hotel(h_name, relevant_hotels)
-        if score < 1.0 and all_hotels_list:
+        if score < 1.0 and (not selected_dest or selected_dest == "Unknown") and all_hotels_list:
             global_match, g_score = fuzzy_match_hotel(h_name, all_hotels_list)
             if g_score >= 1.0:
                 match, score = global_match, g_score
