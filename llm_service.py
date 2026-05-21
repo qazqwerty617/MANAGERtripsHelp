@@ -25,7 +25,7 @@ client = AsyncOpenAI(
 
 _NOISE_TOKENS = {
     "hotel", "hotels", "apartments", "apartment", "apartamentos", "apartamento",
-    "resort", "spa", "villas", "villa", "the", "by", "and", "suites", "suite",
+    "resort", "spa", "the", "by", "and", "suites", "suite",
     "hostal", "pension", "hostel", "a", "of", "member", "adults", "only", "concept", "club", "boutique", "village",
     "beach"
 }
@@ -349,6 +349,10 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
         if query == db_name:
             return h, 1.5 # Increased bonus for exact match
 
+        # 1.1. Exact match ignoring spaces (e.g. Villaconcha vs Villa Concha)
+        if query.replace(" ", "") == db_name.replace(" ", ""):
+            return h, 1.45
+
         # 2. SequenceMatcher score
         ratio1 = difflib.SequenceMatcher(None, query, db_name).ratio()
         ratio2 = difflib.SequenceMatcher(None, query.replace(" ", ""), db_name.replace(" ", "")).ratio()
@@ -365,7 +369,7 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
                 overlap += 1
             else:
                 for dw in db_words:
-                    if len(qw) >= 3 and len(dw) >= 3 and (qw in dw or dw in qw or difflib.SequenceMatcher(None, qw, dw).ratio() > 0.85):
+                    if len(qw) >= 3 and len(dw) >= 3 and difflib.SequenceMatcher(None, qw, dw).ratio() > 0.85:
                         overlap += 1
                         break
                         
@@ -400,7 +404,7 @@ def fuzzy_match_hotel(hotel_name: str, db: list) -> tuple[dict, float]:
                 matched_query_words.add(qw)
             else:
                 for dw in unique_db_words:
-                    if len(qw) >= 3 and len(dw) >= 3 and (qw in dw or dw in qw or difflib.SequenceMatcher(None, qw, dw).ratio() > 0.85):
+                    if len(qw) >= 3 and len(dw) >= 3 and difflib.SequenceMatcher(None, qw, dw).ratio() > 0.85:
                         unique_overlap += 1
                         matched_db_words.add(dw)
                         matched_query_words.add(qw)
